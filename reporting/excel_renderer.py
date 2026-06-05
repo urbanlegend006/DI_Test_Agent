@@ -22,18 +22,22 @@ def apply_auto_width(ws):
             max_len = max(max_len, len(val))
         ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-def render_excel_report(session_state: dict, output_dir: Path) -> Path:
+def render_excel_report(session_state, output_dir: Path) -> Path:
     """Generates a styled, multi-sheet Excel reconciliation report.
-    
+
+    Args:
+        session_state: A SessionContext (or any object exposing the same attributes).
+        output_dir: Directory in which to write the report.
+
     Returns:
         The path of the generated Excel file.
     """
     logger.info("Starting Excel report generation")
-    
-    results = session_state['reconciliation_results']
-    primary_keys = session_state['primary_key_cols']
-    source_filename = session_state['source_filename']
-    target_filename = session_state['target_filename']
+
+    results = session_state.reconciliation_results
+    primary_keys = session_state.primary_key_cols
+    source_filename = session_state.source_filename
+    target_filename = session_state.target_filename
     
     wb = Workbook()
     

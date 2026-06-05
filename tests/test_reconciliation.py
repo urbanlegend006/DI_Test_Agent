@@ -23,20 +23,20 @@ def test_run_reconciliation_missing_state():
 def test_run_reconciliation_success(mock_source_df, mock_target_df):
     # Align and cache the mock dataframes in state
     comp_src, comp_tgt, meta = align_columns(mock_source_df, mock_target_df)
-    SESSION_STATE['comp_source'] = comp_src
-    SESSION_STATE['comp_target'] = comp_tgt
-    SESSION_STATE['source_df'] = mock_source_df
-    SESSION_STATE['target_df'] = mock_target_df
-    SESSION_STATE['align_meta'] = meta
-    
+    SESSION_STATE.comp_source = comp_src
+    SESSION_STATE.comp_target = comp_tgt
+    SESSION_STATE.source_df = mock_source_df
+    SESSION_STATE.target_df = mock_target_df
+    SESSION_STATE.align_meta = meta
+
     summary_res = run_reconciliation.func("id")
-    
+
     # Check text output details
     assert "Reconciliation Completed Successfully!" in summary_res
     assert "Mismatched Rows" in summary_res
-    
+
     # Check cached results state
-    results = SESSION_STATE['reconciliation_results']
+    results = SESSION_STATE.reconciliation_results
     assert results is not None
     assert results['summary']['total_source_rows'] == 5
     assert results['summary']['total_target_rows'] == 5

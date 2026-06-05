@@ -12,15 +12,15 @@ def test_generate_report_no_results():
 def test_generate_report_html_and_excel(tmp_path, mock_source_df, mock_target_df):
     # Setup state
     comp_src, comp_tgt, meta = align_columns(mock_source_df, mock_target_df)
-    SESSION_STATE['comp_source'] = comp_src
-    SESSION_STATE['comp_target'] = comp_tgt
-    SESSION_STATE['source_df'] = mock_source_df
-    SESSION_STATE['target_df'] = mock_target_df
-    SESSION_STATE['align_meta'] = meta
-    SESSION_STATE['source_filename'] = "source.csv"
-    SESSION_STATE['target_filename'] = "target.json"
-    SESSION_STATE['source_fullpath'] = "/dummy/source.csv"
-    SESSION_STATE['target_fullpath'] = "/dummy/target.json"
+    SESSION_STATE.comp_source = comp_src
+    SESSION_STATE.comp_target = comp_tgt
+    SESSION_STATE.source_df = mock_source_df
+    SESSION_STATE.target_df = mock_target_df
+    SESSION_STATE.align_meta = meta
+    SESSION_STATE.source_filename = "source.csv"
+    SESSION_STATE.target_filename = "target.json"
+    SESSION_STATE.source_fullpath = "/dummy/source.csv"
+    SESSION_STATE.target_fullpath = "/dummy/target.json"
     
     # Run reconciliation comparison
     run_reconciliation.func("id")

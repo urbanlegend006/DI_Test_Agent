@@ -5,6 +5,25 @@ import pandas as pd
 
 logger = logging.getLogger("reconciliation_agent.severity_classifier")
 
+# Cache for datetime parsing results - avoids repeated pd.to_datetime() on same values
+_DATETIME_CACHE: dict = {}
+_DATETIME_CACHE_MAX = 4096
+
+
+def _cached_to_datetime(val) -> pd.Timestamp | None:
+    """Internal cached datetime parser."""
+    key = val if isinstance(val, (str, int, float, bool)) else None
+    if key is not None and key in _DATETIME_CACHE:
+        return _DATETIME_CACHE[key]
+    try:
+        result = pd.to_datetime(val)
+    except Exception:
+        result = None
+    if key is not None and len(_DATETIME_CACHE) < _DATETIME_CACHE_MAX:
+        _DATETIME_CACHE[key] = result
+    return result
+
+
 def try_float(val):
     """Helper to convert value to float, returns float or None."""
     if val == "" or val is None:
@@ -20,10 +39,7 @@ def try_datetime(val):
         return val
     if val == "" or val is None:
         return None
-    try:
-        return pd.to_datetime(val)
-    except:
-        return None
+    return _cached_to_datetime(val)
 
 
 def classify_mismatch(column_name: str, source_val, target_val, tolerance_settings: dict = None) -> str:
@@ -87,10 +103,20 @@ def classify_mismatch(column_name: str, source_val, target_val, tolerance_settin
     # 5. Date comparison
     # Try parsing both as datetimes if they look like dates
     try:
-        s_date = pd.to_datetime(source_val, errors='coerce')
-        t_date = pd.to_datetime(target_val, errors='coerce')
-        
-        if not pd.isna(s_date) and not pd.isna(t_date):
+        s_date = _cached_to_datetime(source_val) if not isinstance(source_val, (int, float)) or source_val != source_val else None
+        t_date = _cached_to_datetime(target_val) if not isinstance(target_val, (int, float)) or target_val != target_val else None
+        if s_date is None and isinstance(source_val, (int, float)) and not pd.isna(source_val):
+            try:
+                s_date = pd.to_datetime(source_val, errors='coerce')
+            except Exception:
+                s_date = None
+        if t_date is None and isinstance(target_val, (int, float)) and not pd.isna(target_val):
+            try:
+                t_date = pd.to_datetime(target_val, errors='coerce')
+            except Exception:
+                t_date = None
+
+        if s_date is not None and t_date is not None and not pd.isna(s_date) and not pd.isna(t_date):
             time_diff = abs((s_date - t_date).total_seconds())
             
             # Load date tolerance (default: 60 seconds)

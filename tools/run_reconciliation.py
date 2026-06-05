@@ -74,20 +74,21 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
     from rich.console import Console
     from rich.panel import Panel
     Console().print(Panel(
-        f"[yellow]Primary Key(s): {primary_key}\nTolerance Settings: {tolerance}[/yellow]",
-        title="[bold yellow]Tool Call: run_reconciliation[/bold yellow]",
-        border_style="yellow"
+        f"[yellow]key: {primary_key}\ntolerance: {tolerance}[/yellow]",
+        title="[yellow]\U0001f517 run_reconciliation[/yellow]",
+        border_style="yellow",
+        padding=(0, 1)
     ))
     
     # Check if files have been loaded first
-    if 'comp_source' not in SESSION_STATE or 'comp_target' not in SESSION_STATE:
+    if SESSION_STATE.comp_source is None or SESSION_STATE.comp_target is None:
         return "Error: Source and Target data have not been loaded yet. Please call analyze_files first."
-        
-    comp_source = SESSION_STATE['comp_source']
-    comp_target = SESSION_STATE['comp_target']
-    source_df = SESSION_STATE['source_df']
-    target_df = SESSION_STATE['target_df']
-    align_meta = SESSION_STATE['align_meta']
+
+    comp_source = SESSION_STATE.comp_source
+    comp_target = SESSION_STATE.comp_target
+    source_df = SESSION_STATE.source_df
+    target_df = SESSION_STATE.target_df
+    align_meta = SESSION_STATE.align_meta
     
     # Parse primary key columns
     key_cols = [k.strip() for k in primary_key.split(",") if k.strip()]
@@ -105,8 +106,8 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
             logger.warning("Failed to parse tolerance JSON. Defaulting to strict: %s", e)
             
     # Set key columns in session state
-    SESSION_STATE['primary_key_cols'] = key_cols
-    SESSION_STATE['tolerance_settings'] = tolerance_dict
+    SESSION_STATE.primary_key_cols = key_cols
+    SESSION_STATE.tolerance_settings = tolerance_dict
     
     try:
         # Helper to generate unique index keys for mapping rows
@@ -123,18 +124,27 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
             return val_str
 
         def generate_index_key(df: pd.DataFrame, keys: list[str]) -> pd.Series:
-            key_df = df[keys].copy()
+            # Vectorized normalization per column, then vectorized string concat
+            parts = []
             for col in keys:
-                key_df[col] = key_df[col].apply(normalize_single_key)
-            return key_df.agg('|'.join, axis=1)
-            
+                normalized = df[col].map(normalize_single_key)
+                parts.append(normalized.replace("", "\x00"))  # preserve empty vs real value
+            combined = parts[0]
+            for p in parts[1:]:
+                combined = combined + "|" + p
+            return combined.str.replace("\x00", "")
+
+        def generate_raw_index_key(df: pd.DataFrame, keys: list[str]) -> pd.Series:
+            # Vectorized string concat (no per-row Python .agg)
+            combined = df[keys[0]].astype(str)
+            for c in keys[1:]:
+                combined = combined + "|" + df[c].astype(str)
+            return combined
+
         src_keys = generate_index_key(comp_source, key_cols)
         tgt_keys = generate_index_key(comp_target, key_cols)
-        
+
         # Build raw keys (without formatting normalization) to map back to original display format
-        def generate_raw_index_key(df: pd.DataFrame, keys: list[str]) -> pd.Series:
-            return df[keys].astype(str).agg('|'.join, axis=1)
-            
         src_raw_keys = generate_raw_index_key(comp_source, key_cols)
         tgt_raw_keys = generate_raw_index_key(comp_target, key_cols)
         
@@ -206,58 +216,80 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
             row_data = sanitize_dict(orig_tgt_clean.loc[k].to_dict())
             missing_in_source.append({"row_key": get_display_key(k), "row_data": row_data})
             
-        # 3. Value comparison
+        # 3. Value comparison (VECTORIZED per column, then iterate only mismatches)
         mismatches = []
         matched_count = 0
         mismatched_count = 0
-        
+        total = len(common_keys_set)
+
         # Track column-level mismatch distribution
-        col_mismatch_stats = {col: {"total": 0, "Critical": 0, "Warning": 0, "Info": 0} 
+        col_mismatch_stats = {col: {"total": 0, "Critical": 0, "Warning": 0, "Info": 0}
                               for col in comp_src_clean.columns if col not in key_cols}
-                              
-        for key in sorted(common_keys_set):
-            src_row = comp_src_clean.loc[key]
-            tgt_row = comp_tgt_clean.loc[key]
-            
-            row_has_mismatch = False
-            
-            for col in comp_src_clean.columns:
-                if col in key_cols:
-                    continue
-                    
-                val_src = src_row[col]
-                val_tgt = tgt_row[col]
-                
-                # Check match status
-                is_match = False
-                if val_src == val_tgt:
-                    is_match = True
-                elif isinstance(val_src, (int, float)) and isinstance(val_tgt, (int, float)):
-                    if np.isclose(val_src, val_tgt, equal_nan=True):
-                        is_match = True
-                        
-                if not is_match:
-                    row_has_mismatch = True
-                    sev = classify_mismatch(col, val_src, val_tgt, tolerance_dict)
-                    diff_markup = get_char_diff_html(val_src, val_tgt)
-                    
-                    mismatches.append({
-                        "row_key": get_display_key(key),
-                        "column": col,
-                        "source_value": str(val_src),
-                        "target_value": str(val_tgt),
-                        "severity": sev,
-                        "diff_html": diff_markup
-                    })
-                    
-                    if col in col_mismatch_stats:
-                        col_mismatch_stats[col]["total"] += 1
-                        col_mismatch_stats[col][sev] += 1
-                        
-            if row_has_mismatch:
-                mismatched_count += 1
-            else:
-                matched_count += 1
+
+        compare_columns = [c for c in comp_src_clean.columns if c not in key_cols]
+
+        # Align both DataFrames on the common keys so per-column vectorized comparison works
+        common_keys_list = sorted(common_keys_set)
+        comp_src_aligned = comp_src_clean.reindex(common_keys_list)
+        comp_tgt_aligned = comp_tgt_clean.reindex(common_keys_list)
+
+        from rich.console import Console as _ProgressConsole
+        _prog_console = _ProgressConsole()
+        _prog_console.print(f"[dim]  Comparing {total} rows across {len(compare_columns)} columns...[/dim]")
+
+        for col in compare_columns:
+            src_vals = comp_src_aligned[col]
+            tgt_vals = comp_tgt_aligned[col]
+
+            # Vectorized exact match
+            match_mask = (src_vals == tgt_vals).fillna(False)
+
+            # Vectorized numeric fuzzy match (only meaningful for numeric dtypes)
+            if src_vals.dtype.kind in "fiuc" and tgt_vals.dtype.kind in "fiuc":
+                with np.errstate(invalid="ignore"):
+                    numeric_close = np.isclose(
+                        src_vals.astype(float),
+                        tgt_vals.astype(float),
+                        equal_nan=True,
+                        rtol=1e-05,
+                        atol=1e-08,
+                    )
+                match_mask = match_mask | pd.Series(numeric_close, index=src_vals.index).fillna(False)
+
+            mismatched_keys = match_mask[~match_mask].index.tolist()
+            if not mismatched_keys:
+                continue
+
+            for key in mismatched_keys:
+                val_src = src_vals[key]
+                val_tgt = tgt_vals[key]
+
+                sev = classify_mismatch(col, val_src, val_tgt, tolerance_dict)
+                diff_markup = get_char_diff_html(val_src, val_tgt)
+
+                mismatches.append({
+                    "row_key": get_display_key(key),
+                    "column": col,
+                    "source_value": str(val_src),
+                    "target_value": str(val_tgt),
+                    "severity": sev,
+                    "diff_html": diff_markup,
+                })
+
+                if col in col_mismatch_stats:
+                    col_mismatch_stats[col]["total"] += 1
+                    col_mismatch_stats[col][sev] += 1
+
+        # Compute matched vs mismatched row counts from per-column mismatch index sets
+        mismatch_keys_by_column = {}
+        for m in mismatches:
+            mismatch_keys_by_column.setdefault(m["column"], set()).add(m["row_key"])
+        rows_with_mismatch = set().union(*mismatch_keys_by_column.values()) if mismatch_keys_by_column else set()
+        mismatched_count = len(rows_with_mismatch)
+        matched_count = total - mismatched_count
+
+        # Show progress completion
+        _prog_console.print(f"[dim]  Comparison complete: {matched_count} matched, {mismatched_count} mismatched[/dim]")
                 
         # 4. Compile Results Data Structure
         results = {
@@ -283,7 +315,8 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
         }
         
         # Save results in SESSION_STATE
-        SESSION_STATE['reconciliation_results'] = results
+        SESSION_STATE.reconciliation_results = results
+        SESSION_STATE._recon_table_shown = False
         
         # Render a text summary for the terminal response
         terminal_summary = (

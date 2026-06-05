@@ -5,21 +5,25 @@ from jinja2 import Environment, FileSystemLoader
 
 logger = logging.getLogger("reconciliation_agent.reporting.html_renderer")
 
-def render_html_report(session_state: dict, output_dir: Path) -> Path:
+def render_html_report(session_state, output_dir: Path) -> Path:
     """Renders a self-contained HTML report with Chart.js and client-side SheetJS download.
-    
+
+    Args:
+        session_state: A SessionContext (or any object exposing the same attributes).
+        output_dir: Directory in which to write the report.
+
     Returns:
         The path of the generated HTML file.
     """
     logger.info("Starting HTML report rendering")
-    
-    results = session_state['reconciliation_results']
-    primary_keys = session_state['primary_key_cols']
-    source_filename = session_state['source_filename']
-    target_filename = session_state['target_filename']
-    source_fullpath = session_state['source_fullpath']
-    target_fullpath = session_state['target_fullpath']
-    tolerance_settings = session_state.get('tolerance_settings')
+
+    results = session_state.reconciliation_results
+    primary_keys = session_state.primary_key_cols
+    source_filename = session_state.source_filename
+    target_filename = session_state.target_filename
+    source_fullpath = session_state.source_fullpath
+    target_fullpath = session_state.target_fullpath
+    tolerance_settings = session_state.tolerance_settings
     
     # 1. Prepare Chart.js data
     # Count severity counts

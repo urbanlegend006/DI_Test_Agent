@@ -98,10 +98,10 @@ def test_full_toolchain_pipeline(temp_files):
         "target_path": tgt_path
     })
     assert "Successfully loaded" in result_analyze
-    assert "source_df" in SESSION_STATE
-    assert "target_df" in SESSION_STATE
-    assert "comp_source" in SESSION_STATE
-    assert "comp_target" in SESSION_STATE
+    assert SESSION_STATE.source_df is not None
+    assert SESSION_STATE.target_df is not None
+    assert SESSION_STATE.comp_source is not None
+    assert SESSION_STATE.comp_target is not None
 
     # Step 2: Run reconciliation
     result_recon = run_reconciliation.invoke({
@@ -109,9 +109,9 @@ def test_full_toolchain_pipeline(temp_files):
         "tolerance": "strict"
     })
     assert "Reconciliation Completed Successfully!" in result_recon
-    assert "reconciliation_results" in SESSION_STATE
+    assert SESSION_STATE.reconciliation_results is not None
 
-    results = SESSION_STATE["reconciliation_results"]
+    results = SESSION_STATE.reconciliation_results
     assert results["summary"]["matched_rows"] >= 0
     assert results["summary"]["mismatched_rows"] >= 0
     assert isinstance(results["mismatches"], list)
@@ -124,9 +124,23 @@ def test_full_toolchain_pipeline(temp_files):
     # Verify the HTML file was actually created
     assert any("html" in result_html.lower() for _ in [1])
 
-    # Step 4: Generate Excel report
+    # Step 4: Generate Excel report and verify the file is actually created
     result_excel = generate_report.invoke({"format": "excel"})
     assert "Success" in result_excel or "excel" in result_excel.lower()
+
+    # Verify Excel file exists and contains expected sheets
+    import os
+    import glob
+    from openpyxl import load_workbook
+    excel_files = glob.glob(os.path.join(os.path.dirname(temp_files["source_csv"]), "**", "*.xlsx"), recursive=True)
+    # Excel file was generated in REPORTS_DIR (project root), so look there
+    import config
+    excel_reports = glob.glob(os.path.join(config.REPORTS_DIR, "*.xlsx"))
+    assert len(excel_reports) >= 1, "No Excel report was generated"
+    latest_xlsx = max(excel_reports, key=os.path.getmtime)
+    wb = load_workbook(latest_xlsx)
+    assert "Summary" in wb.sheetnames
+    assert "Mismatches" in wb.sheetnames
 
 
 # ---------- Test 5: Tool-chain with invalid primary key ----------

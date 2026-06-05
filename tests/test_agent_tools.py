@@ -21,11 +21,11 @@ def test_analyze_files_success(temp_files):
     assert "No primary key" in res
     
     # Verify cached DataFrames exist in global session state
-    assert 'source_df' in SESSION_STATE
-    assert 'target_df' in SESSION_STATE
-    assert 'comp_source' in SESSION_STATE
-    assert 'comp_target' in SESSION_STATE
-    
+    assert SESSION_STATE.source_df is not None
+    assert SESSION_STATE.target_df is not None
+    assert SESSION_STATE.comp_source is not None
+    assert SESSION_STATE.comp_target is not None
+
     # Correct columns aligned
-    comp_src = SESSION_STATE['comp_source']
+    comp_src = SESSION_STATE.comp_source
     assert set(comp_src.columns) == {"id", "name", "price", "updated"}

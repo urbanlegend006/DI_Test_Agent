@@ -7,9 +7,9 @@ from tools import SESSION_STATE
 @pytest.fixture(autouse=True)
 def clean_session_state():
     """Fixture to reset the global session state before and after each test."""
-    SESSION_STATE.clear()
+    SESSION_STATE.reset()
     yield
-    SESSION_STATE.clear()
+    SESSION_STATE.reset()
 
 @pytest.fixture
 def mock_source_df():

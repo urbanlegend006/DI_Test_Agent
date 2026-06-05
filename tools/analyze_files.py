@@ -12,10 +12,38 @@ from utils.key_detector import detect_primary_key
 
 logger = logging.getLogger("reconciliation_agent.tools.analyze_files")
 
+def _detect_csv_delimiter(file_path: Path, encoding: str) -> str:
+    """Sniff the most likely delimiter for a CSV/TXT file from its first line."""
+    try:
+        import csv as _csv
+        with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+            sample = f.read(8192)
+        try:
+            dialect = _csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            return dialect.delimiter
+        except Exception:
+            return ','
+    except Exception:
+        return ','
+
+
+def _announce_load(file_path: Path) -> None:
+    """Print a brief progress message before reading a file."""
+    try:
+        from rich.console import Console
+        size_mb = file_path.stat().st_size / (1024 * 1024)
+        suffix = "MB" if size_mb >= 1 else "KB"
+        size_str = f"{size_mb:.2f} {suffix}" if size_mb >= 1 else f"{size_mb * 1024:.1f} {suffix}"
+        Console().print(f"[dim]  Reading {file_path.name} ({size_str})...[/dim]")
+    except Exception:
+        pass
+
+
 def parse_file_to_df(file_path: Path) -> pd.DataFrame:
-    """Read XLSX, JSON, or CSV file and return a DataFrame."""
+    """Read XLSX, JSON, CSV, TXT, or Parquet file and return a DataFrame."""
     ext = file_path.suffix.lower()
-    
+    _announce_load(file_path)
+
     if ext == '.csv':
         # Detect encoding
         import chardet
@@ -25,16 +53,28 @@ def parse_file_to_df(file_path: Path) -> pd.DataFrame:
             encoding = result['encoding'] or 'utf-8'
         logger.info("Reading CSV file %s with encoding %s", file_path.name, encoding)
         return pd.read_csv(file_path, encoding=encoding)
-        
+
+    elif ext == '.txt':
+        # Treat .txt as a delimited text file (auto-detect delimiter)
+        import chardet
+        with open(file_path, 'rb') as f:
+            raw_data = f.read(10000)
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] or 'utf-8'
+        delimiter = _detect_csv_delimiter(file_path, encoding)
+        logger.info("Reading TXT file %s as delimited (encoding=%s, delimiter=%r)",
+                    file_path.name, encoding, delimiter)
+        return pd.read_csv(file_path, encoding=encoding, sep=delimiter)
+
     elif ext in ('.xlsx', '.xls'):
         logger.info("Reading Excel file %s", file_path.name)
         return pd.read_excel(file_path, engine='openpyxl')
-        
+
     elif ext == '.json':
         logger.info("Reading JSON file %s", file_path.name)
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            
+
         # If the JSON is a dictionary or contains a list inside it
         if isinstance(data, dict):
             # Try to find a list of records in the dict
@@ -48,9 +88,22 @@ def parse_file_to_df(file_path: Path) -> pd.DataFrame:
             return pd.json_normalize(data)
         else:
             raise ValueError("Unsupported JSON structure (must be list of objects or dict containing a list of objects)")
-            
+
+    elif ext == '.parquet':
+        logger.info("Reading Parquet file %s", file_path.name)
+        try:
+            return pd.read_parquet(file_path)
+        except ImportError as e:
+            raise ValueError(
+                "Parquet support requires either 'pyarrow' or 'fastparquet'. "
+                "Install with: pip install pyarrow"
+            ) from e
+
     else:
-        raise ValueError(f"Unsupported file extension: {ext}. Only .xlsx, .json, and .csv are supported.")
+        raise ValueError(
+            f"Unsupported file extension: {ext}. "
+            f"Supported formats: .xlsx, .xls, .csv, .txt, .json, .parquet"
+        )
 
 @tool
 def analyze_files(source_path: str, target_path: str) -> str:
@@ -67,9 +120,10 @@ def analyze_files(source_path: str, target_path: str) -> str:
     from rich.console import Console
     from rich.panel import Panel
     Console().print(Panel(
-        f"[yellow]Source: {source_path}\nTarget: {target_path}[/yellow]",
-        title="[bold yellow]Tool Call: analyze_files[/bold yellow]",
-        border_style="yellow"
+        f"[yellow]source: {source_path}\ntarget: {target_path}[/yellow]",
+        title="[yellow]\U0001f50d analyze_files[/yellow]",
+        border_style="yellow",
+        padding=(0, 1)
     ))
     
     # 1. Clean paths and verify existence
@@ -103,13 +157,38 @@ def analyze_files(source_path: str, target_path: str) -> str:
                 logger.warning("File %s is %.2f MB, which exceeds warning threshold of %d MB", 
                                path.name, size_mb, FILE_SIZE_WARNING_MB)
                                
-        # Load files
-        src_raw_df = parse_file_to_df(src_file)
-        tgt_raw_df = parse_file_to_df(tgt_file)
-        
-        # Normalize DataFrames
-        src_df = normalize_dataframe(src_raw_df)
-        tgt_df = normalize_dataframe(tgt_raw_df)
+        # Load and normalize files in parallel for large files
+        # (only parallelize if both files are > 5MB; small files have negligible load time
+        # and the thread overhead would slow them down)
+        from concurrent.futures import ThreadPoolExecutor
+        PARALLEL_THRESHOLD_MB = 5
+
+        src_size_mb = src_file.stat().st_size / (1024 * 1024)
+        tgt_size_mb = tgt_file.stat().st_size / (1024 * 1024)
+        use_parallel = src_size_mb >= PARALLEL_THRESHOLD_MB and tgt_size_mb >= PARALLEL_THRESHOLD_MB
+
+        if use_parallel:
+            logger.info("Loading and normalizing both files in parallel (parallel threshold: %d MB)",
+                        PARALLEL_THRESHOLD_MB)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_src_raw = executor.submit(parse_file_to_df, src_file)
+                future_tgt_raw = executor.submit(parse_file_to_df, tgt_file)
+                src_raw_df = future_src_raw.result()
+                tgt_raw_df = future_tgt_raw.result()
+
+                # Normalization is also CPU-bound; parallelize it as well
+                future_src_norm = executor.submit(normalize_dataframe, src_raw_df)
+                future_tgt_norm = executor.submit(normalize_dataframe, tgt_raw_df)
+                src_df = future_src_norm.result()
+                tgt_df = future_tgt_norm.result()
+        else:
+            # Sequential load for small files (avoids thread overhead)
+            src_raw_df = parse_file_to_df(src_file)
+            tgt_raw_df = parse_file_to_df(tgt_file)
+
+            # Normalize DataFrames
+            src_df = normalize_dataframe(src_raw_df)
+            tgt_df = normalize_dataframe(tgt_raw_df)
         
         # Align columns
         comp_src, comp_tgt, align_meta = align_columns(src_df, tgt_df)
@@ -132,15 +211,15 @@ def analyze_files(source_path: str, target_path: str) -> str:
             common_keys = detected_tgt_keys
             
         # Cache DataFrames and metadata in SESSION_STATE
-        SESSION_STATE['source_df'] = src_df
-        SESSION_STATE['target_df'] = tgt_df
-        SESSION_STATE['comp_source'] = comp_source = comp_src
-        SESSION_STATE['comp_target'] = comp_target = comp_tgt
-        SESSION_STATE['align_meta'] = align_meta
-        SESSION_STATE['source_filename'] = src_file.name
-        SESSION_STATE['target_filename'] = tgt_file.name
-        SESSION_STATE['source_fullpath'] = str(src_file.resolve())
-        SESSION_STATE['target_fullpath'] = str(tgt_file.resolve())
+        SESSION_STATE.source_df = src_df
+        SESSION_STATE.target_df = tgt_df
+        SESSION_STATE.comp_source = comp_src
+        SESSION_STATE.comp_target = comp_tgt
+        SESSION_STATE.align_meta = align_meta
+        SESSION_STATE.source_filename = src_file.name
+        SESSION_STATE.target_filename = tgt_file.name
+        SESSION_STATE.source_fullpath = str(src_file.resolve())
+        SESSION_STATE.target_fullpath = str(tgt_file.resolve())
         
         # Build success response
         summary = (
@@ -165,10 +244,10 @@ def analyze_files(source_path: str, target_path: str) -> str:
             summary += f"  - Extra columns in Target: {', '.join(align_meta['extra_in_target'])}\n"
             
         if common_keys:
-            SESSION_STATE['detected_keys'] = common_keys
+            SESSION_STATE.detected_keys = common_keys
             summary += f"\n**Suggested Primary Key(s):** {', '.join(common_keys)}\n"
         else:
-            SESSION_STATE['detected_keys'] = None
+            SESSION_STATE.detected_keys = None
             summary += f"\n**Warning:** No primary key could be auto-detected. Please ask the user to supply the primary key(s) before running reconciliation.\n"
             
         return summary
