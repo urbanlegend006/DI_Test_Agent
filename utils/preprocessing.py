@@ -86,6 +86,11 @@ def extract_paths(text: str) -> list[str]:
     return paths
 
 
+_CONVERSATIONAL_WHITELIST: frozenset[str] = frozenset({
+    "hello", "hi", "hey", "help", "who are you", "what is this", "status", "clear", "thanks", "thank you",
+})
+
+
 def is_reconciliation_related(text: str) -> bool:
     """Quick keyword-based classification of user intent.
 
@@ -95,8 +100,19 @@ def is_reconciliation_related(text: str) -> bool:
     """
     lower = text.lower().strip()
 
+    # Conversational whitelist check
+    if any(re.search(r'\b' + re.escape(w) + r'\b', lower) for w in _CONVERSATIONAL_WHITELIST):
+        return True
+
+    def has_word(word_set, string):
+        for word in word_set:
+            pattern = r'\b' + re.escape(word) + r'\b'
+            if re.search(pattern, string):
+                return True
+        return False
+
     # Strong reconciliation signal — takes priority over off-topic.
-    if any(kw in lower for kw in _RECON_KEYWORDS):
+    if has_word(_RECON_KEYWORDS, lower):
         return True
 
     # Has file-like paths
@@ -104,7 +120,7 @@ def is_reconciliation_related(text: str) -> bool:
         return True
 
     # Strong off-topic signal
-    if any(kw in lower for kw in _OFFTOPIC_KEYWORDS):
+    if has_word(_OFFTOPIC_KEYWORDS, lower):
         return False
 
     # Ambiguous — pass through to LLM

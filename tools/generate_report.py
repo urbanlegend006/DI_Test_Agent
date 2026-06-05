@@ -8,7 +8,9 @@ from tools import SESSION_STATE
 
 logger = logging.getLogger("reconciliation_agent.tools.generate_report")
 
-@tool
+from tools.schemas import GenerateReportInput
+
+@tool(args_schema=GenerateReportInput)
 def generate_report(format: str = "html", output_dir: Optional[str] = None) -> str:
     """Generates a detailed reconciliation report in HTML or Excel format.
 
@@ -20,9 +22,9 @@ def generate_report(format: str = "html", output_dir: Optional[str] = None) -> s
         The absolute path to the generated report file.
     """
     logger.info("Invoking generate_report with format='%s'", format)
-    from rich.console import Console
+    from config import console
     from rich.panel import Panel
-    Console().print(Panel(
+    console.print(Panel(
         f"[yellow]format: {format}[/yellow]",
         title="[yellow]\U0001f4ca generate_report[/yellow]",
         border_style="yellow",
@@ -40,7 +42,7 @@ def generate_report(format: str = "html", output_dir: Optional[str] = None) -> s
 
     if SESSION_STATE.reconciliation_results is None:
         return (
-            "Error: Reconciliation has not been run yet. "
+            "❌ Error: Reconciliation has not been run yet. "
             "Please run reconciliation comparison before generating reports."
         )
 
@@ -56,7 +58,7 @@ def generate_report(format: str = "html", output_dir: Optional[str] = None) -> s
             report_path = render_excel_report(SESSION_STATE, reports_dir)
 
         else:
-            return f"Error: Unsupported format '{format}'. Only 'html' and 'excel' formats are supported."
+            return f"❌ Error: Unsupported format '{format}'. Only 'html' and 'excel' formats are supported."
 
         # Convert path to absolute path and format click-friendly Windows URI
         abs_path = report_path.resolve()
@@ -67,11 +69,11 @@ def generate_report(format: str = "html", output_dir: Optional[str] = None) -> s
         SESSION_STATE.workflow_state = "reported"
 
         return (
-            f"Success! The {fmt.upper()} report has been generated.\n"
+            f"✅ Success! The {fmt.upper()} report has been generated.\n"
             f"  \U0001f4c4 Local path: {abs_path}\n"
             f"  \U0001f517 Click to open: {file_uri}"
         )
 
     except Exception as e:
         logger.exception("Error in generate_report tool")
-        return f"Failed to generate report: {str(e)}"
+        return f"❌ Error: Failed to generate report: {str(e)}"

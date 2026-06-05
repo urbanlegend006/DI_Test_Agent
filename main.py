@@ -30,11 +30,10 @@ from rich.markdown import Markdown
 from rich.columns import Columns
 from rich.text import Text
 
-from config import OPENAI_MODEL, configure_logging
+from config import OPENAI_MODEL, configure_logging, console
 from utils.preprocessing import extract_paths, is_reconciliation_related, POLITE_DECLINE
 
 logger = logging.getLogger("reconciliation_agent.main")
-console = Console()
 
 
 def print_welcome_banner():
@@ -87,6 +86,7 @@ def show_help():
     table.add_row("/help", "Show this help message")
     table.add_row("/clear", "Clear screen and reset session state")
     table.add_row("/status", "Show current session status")
+    table.add_row("/results", "Re-display the reconciliation summary table")
     table.add_row("/exit", "Exit the application")
     table.add_row("/quit", "Exit the application")
     console.print(table)
@@ -134,6 +134,10 @@ def handle_slash_command(cmd: str) -> bool:
     elif cmd_lower == "/status":
         show_status()
         return True
+    elif cmd_lower == "/results":
+        SESSION_STATE._recon_table_shown = False
+        print_reconciliation_table()
+        return True
     return False
 
 
@@ -168,6 +172,13 @@ def _preprocess_input(user_input: str) -> dict | None:
             "input": user_input,
             "source_path": paths[0],
             "target_path": paths[1],
+            "report_format": _requested_report_format(user_input),
+        }
+    elif len(paths) == 1:
+        SESSION_STATE._extracted_paths = paths[:1]
+        return {
+            "input": user_input,
+            "source_path": paths[0],
             "report_format": _requested_report_format(user_input),
         }
 
@@ -260,14 +271,6 @@ def _handle_deterministic_shortcut(user_input: str) -> bool:
     return False
 
 
-def get_status_bar():
-    from tools import SESSION_STATE
-
-    src = SESSION_STATE.source_filename or "\u2014"
-    tgt = SESSION_STATE.target_filename or "\u2014"
-    return f"[dim]Model: {OPENAI_MODEL}  \u2502  Source: {src}  \u2502  Target: {tgt}[/dim]"
-
-
 def print_reconciliation_table():
     from tools import SESSION_STATE
 
@@ -333,7 +336,7 @@ def main():
 
     while True:
         try:
-            user_input = console.input(f"[bold cyan]  \u276f[/bold cyan] {get_status_bar()} ")
+            user_input = console.input("[bold cyan]  \u276f[/bold cyan] ")
 
             if not user_input.strip():
                 continue
@@ -356,8 +359,8 @@ def main():
                 console.print()
                 continue
 
-            console.print("[bold green]Agent thinking...[/bold green]")
-            response = agent_executor.invoke(agent_request)
+            with console.status("[bold green]Agent thinking...[/bold green]"):
+                response = agent_executor.invoke(agent_request)
             agent_response = response.get("output", "No response received.")
             tool_calls = response.get("tool_calls", [])
 

@@ -5,6 +5,10 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from dotenv import load_dotenv
 from rich.logging import RichHandler
+from rich.console import Console
+
+# Shared Console
+console = Console()
 
 # Load .env variables
 load_dotenv(override=True)

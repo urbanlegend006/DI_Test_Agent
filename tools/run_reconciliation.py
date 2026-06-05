@@ -309,7 +309,9 @@ def _render_summary(results: dict, mismatches: list[dict]) -> str:
 # Main tool function
 # ---------------------------------------------------------------------------
 
-@tool
+from tools.schemas import RunReconciliationInput
+
+@tool(args_schema=RunReconciliationInput)
 def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
     """Performs row-by-row reconciliation between Source and Target DataFrames.
 
@@ -321,9 +323,9 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
         A text summary showing total rows, matched, mismatched, and missing rows.
     """
     logger.info("Invoking run_reconciliation with primary_key='%s', tolerance='%s'", primary_key, tolerance)
-    from rich.console import Console
+    from config import console
     from rich.panel import Panel
-    Console().print(Panel(
+    console.print(Panel(
         f"[yellow]key: {primary_key}\ntolerance: {tolerance}[/yellow]",
         title="[yellow]\U0001f517 run_reconciliation[/yellow]",
         border_style="yellow",
@@ -332,7 +334,7 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
 
     if SESSION_STATE.comp_source is None or SESSION_STATE.comp_target is None:
         SESSION_STATE.workflow_state = "awaiting_paths"
-        return "Error: Source and Target data have not been loaded yet. Please call analyze_files first."
+        return "❌ Error: Source and Target data have not been loaded yet. Please call analyze_files first."
 
     comp_source = SESSION_STATE.comp_source
     comp_target = SESSION_STATE.comp_target
@@ -343,7 +345,7 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
     for key in key_cols:
         if key not in comp_source.columns:
             SESSION_STATE.workflow_state = "awaiting_primary_key"
-            return f"Error: Key column '{key}' not found in the aligned columns. Available columns: {list(comp_source.columns)}"
+            return f"❌ Error: Key column '{key}' not found in the aligned columns. Available columns: {list(comp_source.columns)}"
 
     tolerance_dict = None
     if tolerance.strip().lower() != "strict":
@@ -416,9 +418,9 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
         SESSION_STATE.report_path = None
         SESSION_STATE.report_format = None
 
-        return _render_summary(results, mismatches)
+        return "✅ " + _render_summary(results, mismatches)
 
     except Exception as e:
         logger.exception("Error during reconciliation processing")
         SESSION_STATE.workflow_state = "analyzed"
-        return f"Error executing reconciliation comparison: {str(e)}"
+        return f"❌ Error executing reconciliation comparison: {str(e)}"

@@ -42,11 +42,11 @@ def _announce_load(file_path: Path) -> None:
     if not file_path.exists():
         return
     try:
-        from rich.console import Console
+        from config import console
         size_mb = file_path.stat().st_size / (1024 * 1024)
         suffix = "MB" if size_mb >= 1 else "KB"
         size_str = f"{size_mb:.2f} {suffix}" if size_mb >= 1 else f"{size_mb * 1024:.1f} {suffix}"
-        Console().print(f"[dim]  Reading {file_path.name} ({size_str})...[/dim]")
+        console.print(f"[dim]  Reading {file_path.name} ({size_str})...[/dim]")
     except (OSError, PermissionError) as e:
         logger.debug("Failed to print file load announcement for %s: %s", file_path.name, e)
 
@@ -217,8 +217,11 @@ def _profile_key_candidates(df: pd.DataFrame) -> list[dict]:
     )
 
 
-@tool
-def analyze_files(source_path: str, target_path: str) -> str:
+from typing import Optional
+from tools.schemas import AnalyzeFilesInput
+
+@tool(args_schema=AnalyzeFilesInput)
+def analyze_files(source_path: str, target_path: Optional[str] = None) -> str:
     """Ingests source and target files, parses them, normalizes columns, and returns data structure details.
 
     Args:
@@ -229,9 +232,9 @@ def analyze_files(source_path: str, target_path: str) -> str:
         A text summary of the files, their shapes, aligned columns, and detected key candidates.
     """
     logger.info("Invoking analyze_files on source='%s', target='%s'", source_path, target_path)
-    from rich.console import Console
+    from config import console
     from rich.panel import Panel
-    Console().print(Panel(
+    console.print(Panel(
         f"[yellow]source: {source_path}\ntarget: {target_path}[/yellow]",
         title="[yellow]\U0001f50d analyze_files[/yellow]",
         border_style="yellow",
@@ -240,14 +243,38 @@ def analyze_files(source_path: str, target_path: str) -> str:
 
     try:
         src_file = clean_path(source_path)
-        tgt_file = clean_path(target_path)
-
+        is_single_file = not target_path or str(target_path).lower() == "none"
+        
         if not src_file.exists():
             SESSION_STATE.workflow_state = "awaiting_paths"
-            return f"Error: Source file does not exist at path: {source_path}"
+            return f"❌ Error: Source file does not exist at path: {source_path}"
+            
+        if is_single_file:
+            size_mb = src_file.stat().st_size / (1024 * 1024)
+            if size_mb > FILE_SIZE_WARNING_MB:
+                logger.warning("File %s is %.2f MB, which exceeds warning threshold of %d MB",
+                               src_file.name, size_mb, FILE_SIZE_WARNING_MB)
+            src_raw_df = parse_file_to_df(src_file)
+            src_df = normalize_dataframe(src_raw_df)
+            
+            SESSION_STATE.source_df = src_df
+            SESSION_STATE.source_filename = src_file.name
+            SESSION_STATE.source_fullpath = str(src_file.resolve())
+            SESSION_STATE.workflow_state = "awaiting_paths"
+            
+            return (
+                f"Successfully loaded {src_file.name}!\n"
+                f"- Format: {src_file.suffix}\n"
+                f"- Size: {size_mb * 1024:.2f} KB\n"
+                f"- Total Rows: {len(src_df)}\n"
+                f"- Total Columns: {len(src_df.columns)}\n\n"
+                f"Please provide the target file path to proceed with reconciliation."
+            )
+
+        tgt_file = clean_path(target_path)
         if not tgt_file.exists():
             SESSION_STATE.workflow_state = "awaiting_paths"
-            return f"Error: Target file does not exist at path: {target_path}"
+            return f"❌ Error: Target file does not exist at path: {target_path}"
 
         # Check file sizes
         for path in (src_file, tgt_file):
@@ -285,7 +312,7 @@ def analyze_files(source_path: str, target_path: str) -> str:
         SESSION_STATE.report_path = None
         SESSION_STATE.report_format = None
 
-        return _build_summary(src_file, tgt_file, src_df, tgt_df, align_meta, common_keys, key_profile)
+        return "✅ " + _build_summary(src_file, tgt_file, src_df, tgt_df, align_meta, common_keys, key_profile)
 
     except Exception as e:
         logger.exception("Error in analyze_files")

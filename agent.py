@@ -132,7 +132,13 @@ class ReconciliationAgentWrapper:
                 "metadata": self._session_metadata(),
             }
 
-        user_msg = HumanMessage(content=self._build_user_content(input_dict))
+        user_content = self._build_user_content(input_dict)
+        if self.system_prompt:
+            from utils.prompts import _build_state_block
+            state_block = _build_state_block(SESSION_STATE)
+            user_msg = HumanMessage(content=f"{user_content}\n{state_block}")
+        else:
+            user_msg = HumanMessage(content=user_content)
         state = {"messages": [user_msg]}
 
         try:
