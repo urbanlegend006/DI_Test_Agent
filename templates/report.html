@@ -1,0 +1,2002 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Reconciliation Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { 
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        indigo: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 900: '#312e81' },
+                        slate: { 50: '#f8fafc', 800: '#1e293b', 900: '#0d1117', 950: '#0d1117' }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    }
+                } 
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+            :root {
+                --surface: 255, 255, 255;
+                --surface-dark: 22, 27, 34;
+                --accent: 99, 102, 241;
+            }
+            ::-webkit-scrollbar { width: 8px; height: 8px; }
+            ::-webkit-scrollbar-track { background: transparent; }
+            ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+            .dark ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.5); border-radius: 4px; }
+            body { 
+                background-color: #f8fafc; 
+                font-family: 'Inter', sans-serif;
+            }
+            .dark body { background-color: #0d1117; color: #e6edf3; }
+            
+            #sidebar {
+                transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+                width: 16rem;
+                overflow: hidden;
+            }
+            #sidebar.collapsed {
+                width: 5rem;
+            }
+            #sidebar .sidebar-label {
+                transition: opacity 0.25s, max-width 0.25s;
+                opacity: 1;
+                max-width: 200px;
+                overflow: hidden;
+                white-space: nowrap;
+            }
+            #sidebar.collapsed .sidebar-label {
+                opacity: 0;
+                max-width: 0;
+            }
+            #sidebar.collapsed nav a {
+                justify-content: center;
+                padding-left: 0;
+                padding-right: 0;
+            }
+            #sidebar.collapsed nav a svg {
+                margin: 0 auto;
+            }
+            #sidebar-toggle-btn {
+                transition: all 0.3s;
+            }
+            
+            .nav-active {
+                background: rgba(var(--accent), 0.1) !important;
+                color: rgb(var(--accent)) !important;
+                font-weight: 700 !important;
+                border-right: 3px solid rgb(var(--accent));
+            }
+
+            .kpi-card {
+                position: relative;
+                overflow: hidden;
+            }
+            .kpi-card::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(135deg, rgba(var(--accent), 0.05) 0%, transparent 60%);
+                opacity: 0;
+                transition: opacity 0.3s;
+            }
+            .kpi-card:hover::after {
+                opacity: 1;
+            }
+            .kpi-counter.kpi-skeleton {
+                width: 8.5rem;
+                height: 2.25rem;
+                border-radius: 0.75rem;
+                color: transparent !important;
+                background: linear-gradient(90deg, rgba(226,232,240,0.9) 25%, rgba(199,210,254,0.65) 37%, rgba(226,232,240,0.9) 63%);
+                background-size: 400% 100%;
+                animation: kpiSkeletonShimmer 1.4s ease-in-out infinite;
+            }
+            .dark .kpi-counter.kpi-skeleton {
+                background: linear-gradient(90deg, rgba(30,41,59,0.95) 25%, rgba(79,70,229,0.35) 37%, rgba(30,41,59,0.95) 63%);
+                background-size: 400% 100%;
+            }
+            @keyframes kpiSkeletonShimmer {
+                0% { background-position: 100% 0; }
+                100% { background-position: 0 0; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .kpi-counter.kpi-skeleton {
+                    animation: none;
+                }
+            }
+
+            @keyframes slideDown {
+                from { max-height: 0; opacity: 0; }
+                to { max-height: 2000px; opacity: 1; }
+            }
+            .expanded {
+                display: table-row !important;
+                animation: slideDown 0.4s ease-out forwards;
+            }
+
+            /* v3.0 Staggered entrance */
+            @keyframes fadeSlideUp {
+                from { opacity: 0; transform: translateY(24px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .stagger-card {
+                opacity: 0;
+                animation: fadeSlideUp 0.5s ease-out forwards;
+            }
+            .stagger-card:nth-child(1) { animation-delay: 0s; }
+            .stagger-card:nth-child(2) { animation-delay: 0.08s; }
+            .stagger-card:nth-child(3) { animation-delay: 0.16s; }
+            .stagger-card:nth-child(4) { animation-delay: 0.24s; }
+            .stagger-card:nth-child(5) { animation-delay: 0.32s; }
+            .stagger-card:nth-child(6) { animation-delay: 0.40s; }
+            .stagger-card:nth-child(7) { animation-delay: 0.48s; }
+            .stagger-card:nth-child(8) { animation-delay: 0.56s; }
+
+            /* v3.0 Toast */
+            @keyframes toastIn {
+                from { opacity: 0; transform: translateY(20px) scale(0.95); }
+                to { opacity: 1; transform: translateY(0) scale(1); }
+            }
+            @keyframes toastOut {
+                from { opacity: 1; transform: translateY(0) scale(1); }
+                to { opacity: 0; transform: translateY(-10px) scale(0.95); }
+            }
+            .toast-enter { animation: toastIn 0.35s ease-out forwards; }
+            .toast-exit { animation: toastOut 0.3s ease-in forwards; }
+
+            /* v3.0 Tab system */
+            .tab-btn {
+                position: relative;
+                transition: all 0.2s;
+                border: 1px solid rgba(226, 232, 240, 0.9);
+                background: rgba(248, 250, 252, 0.85);
+                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+            }
+            .dark .tab-btn {
+                border-color: rgba(48, 54, 61, 0.95);
+                background: rgba(22, 27, 34, 0.9);
+                color: #cdd9e5;
+            }
+            .tab-btn.active {
+                color: #4f46e5;
+                font-weight: 800;
+                border-color: rgba(var(--accent), 0.45);
+                background: rgba(var(--accent), 0.1);
+                box-shadow: 0 8px 24px rgba(var(--accent), 0.12);
+            }
+            .dark .tab-btn.active {
+                color: #c7d2fe;
+            }
+            .tab-btn.active::after {
+                content: '';
+                position: absolute;
+                bottom: -7px;
+                left: 16px;
+                right: 16px;
+                height: 2px;
+                background: rgb(var(--accent));
+                border-radius: 2px;
+            }
+            .tab-panel { display: none; }
+            .tab-panel.active { display: block; }
+            .orphan-card-active {
+                border-color: rgb(99, 102, 241) !important;
+                background-color: rgba(99, 102, 241, 0.05) !important;
+            }
+            .dark .orphan-card-active {
+                border-color: rgb(129, 140, 248) !important;
+                background-color: rgba(129, 140, 248, 0.08) !important;
+            }
+
+            /* v3.0 Severity filter */
+            .sev-filter-btn {
+                transition: all 0.2s;
+                cursor: pointer;
+            }
+            .sev-filter-btn.active {
+                transform: scale(1.05);
+                outline: 2px solid currentColor;
+                outline-offset: 1px;
+            }
+
+            /* v3.0 Grade badge pulse */
+            @keyframes gradePulse {
+                0%, 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0.4); }
+                50% { box-shadow: 0 0 0 6px transparent; }
+            }
+            .grade-badge {
+                animation: gradePulse 2.5s ease-in-out infinite;
+            }
+
+            /* Info tooltip */
+            .info-tooltip-wrapper:hover .info-tooltip {
+                opacity: 1;
+            }
+
+            /* v4.0 Animated Gradient Mesh Background */
+            @keyframes gradientMesh {
+                0%, 100% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+            }
+            #scroll-container {
+                position: relative;
+            }
+            #scroll-container::before {
+                content: '';
+                position: fixed;
+                inset: 0;
+                background: linear-gradient(-45deg, rgba(99,102,241,0.04), rgba(139,92,246,0.03), rgba(148,163,184,0.02), rgba(99,102,241,0.04));
+                background-size: 400% 400%;
+                animation: gradientMesh 20s ease infinite;
+                pointer-events: none;
+                z-index: 0;
+            }
+            .dark #scroll-container::before {
+                background: linear-gradient(-45deg, rgba(99,102,241,0.08), rgba(139,92,246,0.06), rgba(30,41,59,0.04), rgba(99,102,241,0.08));
+            }
+
+            /* v4.0 Elevated Glassmorphism */
+            .glass-card {
+                background: rgba(255,255,255,0.75);
+                backdrop-filter: blur(16px);
+                border: 1px solid rgba(255,255,255,0.25);
+                box-shadow: 0 8px 32px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.2);
+            }
+            .dark .glass-card {
+                background: rgba(22,27,34,0.8);
+                backdrop-filter: blur(16px);
+                border: 1px solid rgba(255,255,255,0.06);
+                box-shadow: 0 8px 32px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.04);
+            }
+            .glass {
+                background: rgba(var(--surface), 0.75);
+                backdrop-filter: blur(16px);
+                border: 1px solid rgba(var(--surface), 0.5);
+                box-shadow: 0 4px 16px rgba(0,0,0,0.03);
+            }
+            .dark .glass {
+                background: rgba(var(--surface-dark), 0.8);
+                backdrop-filter: blur(16px);
+                border: 1px solid rgba(48, 54, 61, 0.8);
+                box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            }
+
+
+            /* v4.0 Character-level Diff Highlighting */
+            .diff-del { background: rgba(239,68,68,0.15); color: #dc2626; text-decoration: line-through; border-radius: 2px; padding: 0 2px; }
+            .diff-add { background: rgba(34,197,94,0.15); color: #16a34a; border-radius: 2px; padding: 0 2px; }
+            .dark .diff-del { background: rgba(239,68,68,0.2); color: #fca5a5; }
+            .dark .diff-add { background: rgba(34,197,94,0.2); color: #86efac; }
+
+            /* v4.0 SQL Syntax Highlighting */
+            .sql-keyword { color: #6366f1; font-weight: 700; }
+            .sql-clause { color: #8b5cf6; font-weight: 600; }
+            .sql-operator { color: #0ea5e9; }
+            .sql-function { color: #d97706; font-weight: 600; }
+            .sql-string { color: #16a34a; }
+            .sql-number { color: #f97316; }
+            .sql-comment { color: #94a3b8; font-style: italic; }
+            .dark .sql-keyword { color: #a5b4fc; }
+            .dark .sql-clause { color: #c4b5fd; }
+            .dark .sql-operator { color: #7dd3fc; }
+            .dark .sql-function { color: #fbbf24; }
+            .dark .sql-string { color: #86efac; }
+            .dark .sql-number { color: #fdba74; }
+            .dark .sql-comment { color: #64748b; }
+
+            /* v4.0 Scroll Snap */
+            .snap-container {
+                scroll-snap-type: y proximity;
+                scroll-padding-top: 1rem;
+            }
+            .snap-section {
+                scroll-snap-align: start;
+            }
+
+            /* v4.0 Sidebar Collapsed Tooltips */
+            #sidebar.collapsed nav a {
+                position: relative;
+            }
+            /* v4.0 tooltip ::after is intentionally NOT redeclared here.
+               The v4.1 Floating Dock sidebar uses dedicated .dock-tooltip
+               spans for collapsed-state hover labels (see line ~1688). */
+
+            /* v4.0 Gradient Active Nav Pill */
+            .nav-active {
+                background: linear-gradient(135deg, rgba(var(--accent), 0.12), rgba(139, 92, 246, 0.08)) !important;
+                color: rgb(var(--accent)) !important;
+                font-weight: 700 !important;
+                border-right: none;
+                box-shadow: 0 2px 8px rgba(var(--accent), 0.1);
+            }
+
+            #matrixTable > thead > tr > th {
+                position: sticky;
+                top: 0;
+                z-index: 20;
+            }
+            #matrixTable > thead > tr > th:not(.glass) {
+                background-color: #f1f5f9;
+            }
+            .dark #matrixTable > thead > tr > th:not(.glass) {
+                background-color: #1e293b;
+            }
+            th.matrix-sticky-total, td.matrix-sticky-total {
+                position: sticky;
+                right: 72px;
+            }
+            th.matrix-sticky-pct, td.matrix-sticky-pct {
+                position: sticky;
+                right: 0;
+            }
+            th.matrix-sticky-total, th.matrix-sticky-pct,
+            tfoot td.matrix-sticky-total, tfoot td.matrix-sticky-pct {
+                z-index: 30;
+            }
+            tbody td.matrix-sticky-total, tbody td.matrix-sticky-pct {
+                z-index: 10;
+            }
+
+            /* Solid opaque backgrounds for all frozen columns to prevent scroll show-through */
+            #matrixTable th.sticky.left-0,
+            #matrixTable tfoot td.sticky.left-0,
+            #matrixTable th.matrix-sticky-total,
+            #matrixTable th.matrix-sticky-pct,
+            #matrixTable tfoot td.matrix-sticky-total,
+            #matrixTable tfoot td.matrix-sticky-pct {
+                background-color: #f1f5f9 !important;
+                backdrop-filter: none !important;
+                z-index: 30 !important;
+            }
+            .dark #matrixTable th.sticky.left-0,
+            .dark #matrixTable tfoot td.sticky.left-0,
+            .dark #matrixTable th.matrix-sticky-total,
+            .dark #matrixTable th.matrix-sticky-pct,
+            .dark #matrixTable tfoot td.matrix-sticky-total,
+            .dark #matrixTable tfoot td.matrix-sticky-pct {
+                background-color: #1e293b !important;
+                backdrop-filter: none !important;
+                z-index: 30 !important;
+            }
+
+            /* Light mode opaque cell backgrounds */
+            #matrixTable tr.matrix-row-critical td.sticky.left-0,
+            #matrixTable tr.matrix-row-critical td.matrix-sticky-total,
+            #matrixTable tr.matrix-row-critical td.matrix-sticky-pct {
+                background-color: #fef2f2 !important;
+                backdrop-filter: none !important;
+            }
+            #matrixTable tr.matrix-row-warning td.sticky.left-0,
+            #matrixTable tr.matrix-row-warning td.matrix-sticky-total,
+            #matrixTable tr.matrix-row-warning td.matrix-sticky-pct {
+                background-color: #fffbeb !important;
+                backdrop-filter: none !important;
+            }
+            #matrixTable tr.matrix-row-info td.sticky.left-0,
+            #matrixTable tr.matrix-row-info td.matrix-sticky-total,
+            #matrixTable tr.matrix-row-info td.matrix-sticky-pct {
+                background-color: #ffffff !important;
+                backdrop-filter: none !important;
+            }
+            #matrixTable tr.matrix-row-info.bg-slate-50\/50 td.sticky.left-0,
+            #matrixTable tr.matrix-row-info.bg-slate-50\/50 td.matrix-sticky-total,
+            #matrixTable tr.matrix-row-info.bg-slate-50\/50 td.matrix-sticky-pct {
+                background-color: #f8fafc !important;
+                backdrop-filter: none !important;
+            }
+
+            /* Dark mode opaque cell backgrounds */
+            .dark #matrixTable tr.matrix-row-critical td.sticky.left-0,
+            .dark #matrixTable tr.matrix-row-critical td.matrix-sticky-total,
+            .dark #matrixTable tr.matrix-row-critical td.matrix-sticky-pct {
+                background-color: #2c1619 !important;
+                backdrop-filter: none !important;
+            }
+            .dark #matrixTable tr.matrix-row-warning td.sticky.left-0,
+            .dark #matrixTable tr.matrix-row-warning td.matrix-sticky-total,
+            .dark #matrixTable tr.matrix-row-warning td.matrix-sticky-pct {
+                background-color: #2d2617 !important;
+                backdrop-filter: none !important;
+            }
+            .dark #matrixTable tr.matrix-row-info td.sticky.left-0,
+            .dark #matrixTable tr.matrix-row-info td.matrix-sticky-total,
+            .dark #matrixTable tr.matrix-row-info td.matrix-sticky-pct {
+                background-color: #161b22 !important;
+                backdrop-filter: none !important;
+            }
+            .dark #matrixTable tr.matrix-row-info.dark\:bg-slate-800\/20 td.sticky.left-0,
+            .dark #matrixTable tr.dark\:bg-slate-800\/20 td.matrix-sticky-total,
+            .dark #matrixTable tr.dark\:bg-slate-800\/20 td.matrix-sticky-pct {
+                background-color: #1e2530 !important;
+                backdrop-filter: none !important;
+            }
+
+            /* Hover background transitions */
+            #matrixTable tr.matrix-row-critical:hover td.sticky.left-0,
+            #matrixTable tr.matrix-row-critical:hover td.matrix-sticky-total,
+            #matrixTable tr.matrix-row-critical:hover td.matrix-sticky-pct {
+                background-color: #fee2e2 !important;
+            }
+            #matrixTable tr.matrix-row-warning:hover td.sticky.left-0,
+            #matrixTable tr.matrix-row-warning:hover td.matrix-sticky-total,
+            #matrixTable tr.matrix-row-warning:hover td.matrix-sticky-pct {
+                background-color: #fef3c7 !important;
+            }
+            #matrixTable tr.matrix-row-info:hover td.sticky.left-0,
+            #matrixTable tr.matrix-row-info:hover td.matrix-sticky-total,
+            #matrixTable tr.matrix-row-info:hover td.matrix-sticky-pct {
+                background-color: #f1f5f9 !important;
+            }
+
+            .dark #matrixTable tr.matrix-row-critical:hover td.sticky.left-0,
+            .dark #matrixTable tr.matrix-row-critical:hover td.matrix-sticky-total,
+            .dark #matrixTable tr.matrix-row-critical:hover td.matrix-sticky-pct {
+                background-color: #3b1c20 !important;
+            }
+            .dark #matrixTable tr.matrix-row-warning:hover td.sticky.left-0,
+            .dark #matrixTable tr.matrix-row-warning:hover td.matrix-sticky-total,
+            .dark #matrixTable tr.matrix-row-warning:hover td.matrix-sticky-pct {
+                background-color: #3c321d !important;
+            }
+            .dark #matrixTable tr.matrix-row-info:hover td.sticky.left-0,
+            .dark #matrixTable tr.matrix-row-info:hover td.matrix-sticky-total,
+            .dark #matrixTable tr.matrix-row-info:hover td.matrix-sticky-pct {
+                background-color: #222a35 !important;
+            }
+
+            /* v4.0 Gradient Header */
+            .gradient-header {
+                background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 50%, #f8fafc 100%);
+            }
+            .dark .gradient-header {
+                background: linear-gradient(135deg, #161b22 0%, #1e1b4b 30%, #0d1117 100%);
+            }
+
+            /* v4.0 Section Divider */
+            .sidebar-section-label {
+                font-size: 10px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                color: #94a3b8;
+                padding: 12px 16px 4px 16px;
+            }
+
+            /* v4.0 Print Styles */
+            @media print {
+                body {
+                    display: block !important;
+                    height: auto !important;
+                    overflow: visible !important;
+                }
+                #sidebar, #scrollTopBtn, #sidebar-toggle-btn, #themeToggle,
+                .sev-filter-btn, #mismatchTypeFilter, #activeFiltersBadge,
+                #matrixSearch, #copyBtn, .tab-btn, #orphanSearch,
+                #orphanPagination, .print-hide {
+                    display: none !important;
+                }
+                main {
+                    display: block !important;
+                    height: auto !important;
+                    overflow: visible !important;
+                }
+                #scroll-container {
+                    overflow: visible !important;
+                    height: auto !important;
+                    max-height: none !important;
+                }
+                #scroll-container::before {
+                    display: none !important;
+                }
+                .accordion-content {
+                    display: table-row !important;
+                }
+                header {
+                    position: relative !important;
+                }
+                #charts, #matrix, #test-queries {
+                    page-break-before: always;
+                }
+                .tab-panel {
+                    display: block !important;
+                }
+                .kpi-card::after { display: none; }
+                .stagger-card { opacity: 1 !important; animation: none !important; }
+                .grade-badge { animation: none !important; }
+                .cmd-palette-overlay, .theme-ripple { display: none !important; }
+                .tab-indicator { display: none !important; }
+                * {
+                    color-adjust: exact !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                }
+                html.dark body { background: white !important; color: #0f172a !important; }
+            }
+
+            /* ========================================
+               v4.1 Modern UI/UX Improvements
+               ======================================== */
+
+            /* === Feature #2: Bento Grid Layout === */
+            .kpi-bento-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                grid-auto-rows: minmax(180px, auto);
+                gap: 1.5rem;
+            }
+            .kpi-bento-hero {
+                grid-column: span 2;
+                grid-row: span 2;
+            }
+            .kpi-bento-large {
+                grid-column: span 2;
+            }
+            @media (max-width: 1024px) {
+                .kpi-bento-grid { grid-template-columns: repeat(2, 1fr); }
+                .kpi-bento-hero { grid-column: span 2; grid-row: span 1; }
+                .kpi-bento-large { grid-column: span 2; }
+            }
+            @media (max-width: 640px) {
+                .kpi-bento-grid { grid-template-columns: 1fr; }
+                .kpi-bento-hero, .kpi-bento-large { grid-column: span 1; }
+            }
+
+            /* === Feature #1: Command Palette (Cmd+K) === */
+            .cmd-palette-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(8px);
+                z-index: 1000;
+                display: flex;
+                align-items: flex-start;
+                justify-content: center;
+                padding-top: 12vh;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 200ms ease;
+            }
+            .cmd-palette-overlay.open {
+                opacity: 1;
+                pointer-events: auto;
+            }
+            .cmd-palette-modal {
+                width: 100%;
+                max-width: 640px;
+                background: rgba(255, 255, 255, 0.98);
+                border: 1px solid rgba(226, 232, 240, 0.8);
+                border-radius: 1rem;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(99, 102, 241, 0.1);
+                transform: translateY(-20px) scale(0.95);
+                transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+                overflow: hidden;
+            }
+            .dark .cmd-palette-modal {
+                background: rgba(22, 27, 34, 0.98);
+                border-color: rgba(48, 54, 61, 0.8);
+            }
+            .cmd-palette-overlay.open .cmd-palette-modal {
+                transform: translateY(0) scale(1);
+            }
+            .cmd-palette-input-wrap {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                padding: 1rem 1.25rem;
+                border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+            }
+            .dark .cmd-palette-input-wrap {
+                border-bottom-color: rgba(48, 54, 61, 0.6);
+            }
+            .cmd-palette-input {
+                flex: 1;
+                background: transparent;
+                border: none;
+                outline: none;
+                font-size: 1rem;
+                font-weight: 500;
+                color: #0f172a;
+            }
+            .dark .cmd-palette-input {
+                color: #e6edf3;
+            }
+            .cmd-palette-input::placeholder {
+                color: #94a3b8;
+            }
+            .cmd-palette-kbd {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.25rem;
+                padding: 0.25rem 0.5rem;
+                font-size: 10px;
+                font-weight: 700;
+                font-family: ui-monospace, monospace;
+                color: #64748b;
+                background: rgba(226, 232, 240, 0.6);
+                border: 1px solid rgba(203, 213, 225, 0.6);
+                border-radius: 0.375rem;
+            }
+            .dark .cmd-palette-kbd {
+                color: #94a3b8;
+                background: rgba(30, 41, 59, 0.6);
+                border-color: rgba(71, 85, 105, 0.6);
+            }
+            .cmd-palette-results {
+                max-height: 50vh;
+                overflow-y: auto;
+                padding: 0.5rem;
+            }
+            .cmd-palette-item {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                padding: 0.625rem 0.875rem;
+                border-radius: 0.5rem;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
+                color: #334155;
+                transition: background 100ms;
+            }
+            .dark .cmd-palette-item {
+                color: #cbd5e1;
+            }
+            .cmd-palette-item:hover,
+            .cmd-palette-item.selected {
+                background: rgba(99, 102, 241, 0.1);
+                color: #4f46e5;
+            }
+            .dark .cmd-palette-item:hover,
+            .dark .cmd-palette-item.selected {
+                background: rgba(99, 102, 241, 0.15);
+                color: #a5b4fc;
+            }
+            .cmd-palette-section-label {
+                padding: 0.5rem 0.875rem 0.25rem;
+                font-size: 10px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                color: #94a3b8;
+            }
+            .cmd-palette-empty {
+                padding: 2rem 1rem;
+                text-align: center;
+                font-size: 12px;
+                color: #94a3b8;
+            }
+
+            /* === Feature #3: Sliding Tab Indicator === */
+            .tab-btn-wrap {
+                position: relative;
+                display: inline-flex;
+                padding: 0.25rem;
+                background: rgba(241, 245, 249, 0.7);
+                border-radius: 0.875rem;
+                border: 1px solid rgba(226, 232, 240, 0.9);
+            }
+            .dark .tab-btn-wrap {
+                background: rgba(30, 41, 59, 0.5);
+                border-color: rgba(48, 54, 61, 0.6);
+            }
+            .tab-indicator {
+                position: absolute;
+                top: 0.25rem;
+                bottom: 0.25rem;
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 0.625rem;
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15), 0 1px 3px rgba(0, 0, 0, 0.05);
+                border: 1px solid rgba(99, 102, 241, 0.2);
+                transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1), width 300ms cubic-bezier(0.4, 0, 0.2, 1);
+                z-index: 0;
+            }
+            .dark .tab-indicator {
+                background: rgba(22, 27, 34, 0.95);
+                border-color: rgba(99, 102, 241, 0.3);
+            }
+            .tab-btn-wrap .tab-btn {
+                position: relative;
+                z-index: 1;
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .tab-btn-wrap .tab-btn.active {
+                color: #4f46e5 !important;
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .dark .tab-btn-wrap .tab-btn.active {
+                color: #a5b4fc !important;
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .tab-btn-wrap .tab-btn.active::after {
+                display: none !important;
+            }
+
+            /* === Feature #4: Theme Transition Ripple === */
+            .theme-ripple {
+                position: fixed;
+                border-radius: 50%;
+                background: rgba(99, 102, 241, 0.25);
+                pointer-events: none;
+                z-index: 9999;
+                transform: scale(0);
+                opacity: 1;
+                transition: transform 700ms cubic-bezier(0.4, 0, 0.2, 1), opacity 700ms ease;
+            }
+            .theme-ripple.expand {
+                transform: scale(80);
+                opacity: 0;
+            }
+            html.theme-transitioning,
+            html.theme-transitioning * {
+                transition: background-color 400ms ease, color 400ms ease, border-color 400ms ease, box-shadow 400ms ease !important;
+            }
+
+            /* === Feature #5: Floating Dock Sidebar === */
+            .dock-container {
+                position: fixed;
+                left: 12px;
+                top: 12px;
+                bottom: 12px;
+                width: 16rem;
+                background: rgba(255, 255, 255, 0.85);
+                backdrop-filter: blur(20px) saturate(180%);
+                -webkit-backdrop-filter: blur(20px) saturate(180%);
+                border: 1px solid rgba(255, 255, 255, 0.4);
+                border-radius: 1.25rem;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+                z-index: 40;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+                overflow: hidden;
+            }
+            .dark .dock-container {
+                background: rgba(22, 27, 34, 0.85);
+                border-color: rgba(48, 54, 61, 0.6);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            }
+            .dock-container.collapsed {
+                width: 5rem;
+            }
+            .dock-nav-item {
+                position: relative;
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                padding: 0.75rem 1rem;
+                border-radius: 0.875rem;
+                color: #475569;
+                font-weight: 500;
+                font-size: 0.875rem;
+                transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1), background 180ms, color 180ms;
+                transform-origin: left center;
+            }
+            .dark .dock-nav-item {
+                color: #cbd5e1;
+            }
+            .dock-container:not(.collapsed) .dock-nav-item:hover {
+                transform: scale(1.03);
+                background: rgba(99, 102, 241, 0.08);
+            }
+            .dark .dock-container:not(.collapsed) .dock-nav-item:hover {
+                background: rgba(99, 102, 241, 0.12);
+            }
+            .dock-nav-item.nav-active-floating {
+                background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.1)) !important;
+                color: #4f46e5 !important;
+                font-weight: 700 !important;
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+            }
+            .dark .dock-nav-item.nav-active-floating {
+                color: #a5b4fc !important;
+            }
+            .dock-magnify-icon {
+                transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .dock-container:not(.collapsed) .dock-nav-item:hover .dock-magnify-icon {
+                transform: scale(1.2);
+            }
+            .dock-tooltip {
+                position: absolute;
+                left: calc(100% + 12px);
+                top: 50%;
+                transform: translateY(-50%);
+                padding: 0.375rem 0.75rem;
+                background: #0f172a;
+                color: #e2e8f0;
+                font-size: 11px;
+                font-weight: 700;
+                border-radius: 0.5rem;
+                white-space: nowrap;
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity 150ms, left 150ms;
+                z-index: 999;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            }
+            .dark .dock-tooltip {
+                background: #1e293b;
+            }
+            .dock-container.collapsed .dock-nav-item:hover .dock-tooltip {
+                opacity: 1;
+                left: calc(100% + 16px);
+            }
+            .dock-section-label {
+                font-size: 10px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                color: #94a3b8;
+                padding: 0.75rem 1rem 0.25rem 1rem;
+            }
+            .dock-content-area {
+                margin-left: 16.75rem;
+                transition: margin-left 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .dock-content-area.collapsed {
+                margin-left: 5.75rem;
+            }
+            @media (max-width: 768px) {
+                .dock-container { transform: translateX(-110%); }
+                .dock-container.mobile-open { transform: translateX(0); }
+                .dock-content-area, .dock-content-area.collapsed { margin-left: 0; }
+            }
+        </style>
+</head>
+<body class="h-full flex overflow-hidden">
+
+    <!-- FLOATING DOCK SIDEBAR -->
+    <div id="sidebar" class="dock-container p-4">
+        <div>
+            <!-- Header/Logo Area -->
+            <div class="flex items-center gap-3 px-2 py-3 mb-6 border-b border-slate-200/50 dark:border-slate-700/50">
+                <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-extrabold shadow-md">
+                    R
+                </div>
+                <div class="sidebar-label">
+                    <h1 class="text-sm font-bold text-slate-800 dark:text-slate-200">ReconAgent</h1>
+                    <span class="text-xs text-slate-500">Test Integrity Engine</span>
+                </div>
+            </div>
+
+            <!-- Navigation Links -->
+            <nav class="space-y-1">
+                <a href="javascript:void(0)" onclick="navigateToSection('overview-section')" class="dock-nav-item nav-active-floating" data-nav-id="overview-section">
+                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z"></path></svg>
+                    <span class="sidebar-label">Overview</span>
+                    <span class="dock-tooltip">Overview</span>
+                </a>
+                <a href="javascript:void(0)" onclick="navigateToSection('mismatch-section')" class="dock-nav-item" data-nav-id="mismatch-section">
+                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    <span class="sidebar-label">Mismatches</span>
+                    <span class="dock-tooltip">Mismatches</span>
+                </a>
+                <a href="javascript:void(0)" onclick="navigateToSection('orphans-section')" class="dock-nav-item" data-nav-id="orphans-section">
+                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14v6m-3-3h6M6 10h2a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2zm10 0h2a2 2 0 002-2V6a2 2 0 00-2-2h-2a2 2 0 00-2 2v2a2 2 0 002 2zM6 20h2a2 2 0 002-2v-2a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2z"></path></svg>
+                    <span class="sidebar-label">Missing/Duplicates</span>
+                    <span class="dock-tooltip">Missing & Duplicates</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- Sidebar Footer Actions -->
+        <div class="space-y-2 pt-4 border-t border-slate-200/50 dark:border-slate-700/50">
+            <button id="themeToggle" onclick="toggleTheme()" class="w-full flex items-center gap-3 p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                <span class="sidebar-label text-sm font-medium">Dark Mode</span>
+            </button>
+            <button onclick="downloadExcelReport()" class="w-full flex items-center gap-3 p-2.5 rounded-xl text-green-600 hover:bg-green-50 dark:hover:bg-green-950/30 transition-colors">
+                <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <span class="sidebar-label text-sm font-medium">Download Excel</span>
+            </button>
+            <button id="sidebar-toggle-btn" onclick="toggleSidebar()" class="w-full flex items-center gap-3 p-2.5 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                <svg id="sidebar-toggle-icon" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                <span class="sidebar-label text-sm font-medium">Collapse</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="flex-1 dock-content-area flex flex-col h-screen overflow-hidden relative z-10">
+        
+        <!-- HEADER -->
+        <header class="p-6 md:p-8 bg-gradient-to-r from-indigo-50/50 to-slate-50/50 dark:from-indigo-900/10 dark:to-slate-900/10 border-b border-slate-200/40 dark:border-slate-800/40 backdrop-blur-md z-30">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-800 dark:text-slate-100">Data Reconciliation Report</h2>
+                    <p class="text-sm text-slate-500 mt-1">
+                        Report generated on <span class="font-semibold text-indigo-600 dark:text-indigo-400">{{ run_time }}</span>
+                    </p>
+                </div>
+                <!-- Command Palette Shortcut Hint -->
+                <div class="hidden md:flex items-center gap-2 text-xs text-slate-400">
+                    <span>Press</span>
+                    <kbd class="px-2 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-sm font-mono font-bold">Ctrl + K</kbd>
+                    <span>for Command Palette</span>
+                </div>
+            </div>
+
+            <!-- Run Metadata Details -->
+            <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs bg-slate-100/40 dark:bg-slate-800/30 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/50">
+                <div class="space-y-1">
+                    <div><span class="font-bold text-slate-500">Source:</span> <span class="text-slate-700 dark:text-slate-300 font-mono">{{ source_filename }}</span></div>
+                    <div class="text-slate-400 truncate hover:text-clip">Path: {{ source_fullpath }}</div>
+                </div>
+                <div class="space-y-1">
+                    <div><span class="font-bold text-slate-500">Target:</span> <span class="text-slate-700 dark:text-slate-300 font-mono">{{ target_filename }}</span></div>
+                    <div class="text-slate-400 truncate hover:text-clip">Path: {{ target_fullpath }}</div>
+                </div>
+                <div class="md:col-span-2 border-t border-slate-200/30 dark:border-slate-700/30 pt-2 flex flex-wrap gap-x-6 gap-y-1">
+                    <div><span class="font-bold text-slate-500">Keys:</span> <span class="px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 font-mono font-semibold">{{ primary_key_cols | join(', ') }}</span></div>
+                    <div>
+                        <span class="font-bold text-slate-500">Tolerance:</span> 
+                        <span class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
+                            {% if tolerance_settings %}
+                                {{ tolerance_settings | tojson }}
+                            {% else %}
+                                Strict
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- SCROLL CONTAINER -->
+        <div class="flex-1 overflow-y-auto snap-container p-6 md:p-8 space-y-10" id="scroll-container">
+
+            <!-- SECTION 1: OVERVIEW -->
+            <section id="overview-section" class="snap-section space-y-6 scroll-mt-6">
+                
+                <!-- BENTO GRID KPI CARDS -->
+                <div class="kpi-bento-grid">
+                    
+                    <!-- HERO: Reconciliation Grade & Match % -->
+                    {% set total_clean = results.summary.clean_source_rows %}
+                    {% set matched = results.summary.matched_rows %}
+                    {% set match_rate = ((matched / total_clean) * 100) | round(2) if total_clean > 0 else 0.0 %}
+                    
+                    <div class="kpi-bento-hero glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden group">
+                        <div class="flex items-start justify-between">
+                            <div>
+                                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Data Integrity Grade</span>
+                                <h3 class="text-3xl font-black mt-2 text-indigo-600 dark:text-indigo-400">
+                                    {% if match_rate >= 99.0 %}
+                                        Grade A+
+                                    {% elif match_rate >= 95.0 %}
+                                        Grade A
+                                    {% elif match_rate >= 90.0 %}
+                                        Grade B
+                                    {% elif match_rate >= 75.0 %}
+                                        Grade C
+                                    {% else %}
+                                        Grade F
+                                    {% endif %}
+                                </h3>
+                            </div>
+                            <div class="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg grade-badge
+                                {% if match_rate >= 95.0 %}
+                                    bg-green-100 dark:bg-green-950/50 text-green-600 dark:text-green-400
+                                {% elif match_rate >= 75.0 %}
+                                    bg-yellow-100 dark:bg-yellow-950/50 text-yellow-600 dark:text-yellow-400
+                                {% else %}
+                                    bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400
+                                {% endif %}">
+                                {{ match_rate }}%
+                            </div>
+                        </div>
+                        <div class="mt-6 space-y-2">
+                            <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400">
+                                <span>Reconciliation Match Rate</span>
+                                <span class="font-bold">{{ matched }} / {{ total_clean }} unique rows matched</span>
+                            </div>
+                            <!-- Bar animation -->
+                            <div class="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                                <div class="bg-indigo-600 dark:bg-indigo-400 h-2 rounded-full transition-all duration-1000" style="width: {{ match_rate }}%"></div>
+                            </div>
+                            <p class="text-[10px] text-slate-400/80 mt-1 leading-normal">
+                                * Computed on deduplicated unique keys: matched / unique source.
+                                {% if results.summary.duplicate_source > 0 or results.summary.duplicate_target > 0 %}
+                                Excludes duplicates ({{ results.summary.duplicate_source }} source, {{ results.summary.duplicate_target }} target).
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Card 2: Total Records -->
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Rows</span>
+                        <div class="grid grid-cols-2 divide-x divide-slate-200/50 dark:divide-slate-700/50 mt-1">
+                            <div class="pr-3">
+                                <span class="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">Source</span>
+                                <div class="text-2xl md:text-3xl font-extrabold text-slate-800 dark:text-slate-200">{{ results.summary.total_source_rows }}</div>
+                                <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight">
+                                    <span class="font-semibold">{{ results.summary.clean_source_rows }}</span> unique<br>
+                                    <span class="font-semibold">{{ results.summary.duplicate_source }}</span> dupes
+                                </div>
+                            </div>
+                            <div class="pl-3">
+                                <span class="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">Target</span>
+                                <div class="text-2xl md:text-3xl font-extrabold text-slate-800 dark:text-slate-200">{{ results.summary.total_target_rows }}</div>
+                                <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight">
+                                    <span class="font-semibold">{{ results.summary.clean_target_rows }}</span> unique<br>
+                                    <span class="font-semibold">{{ results.summary.duplicate_target }}</span> dupes
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 3: Mismatches -->
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Mismatched Rows</span>
+                        <div>
+                            <div class="text-2xl md:text-3xl font-extrabold text-red-500">{{ results.summary.mismatched_rows }}</div>
+                            <div class="text-xs text-slate-500 mt-1">{{ results.mismatches | length }} field discrepancies</div>
+                        </div>
+                    </div>
+
+                    <!-- Card 4: Missing in Target -->
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Missing In Target</span>
+                        <div>
+                            <div class="text-2xl md:text-3xl font-extrabold text-yellow-500">{{ results.summary.missing_in_target }}</div>
+                            <div class="text-xs text-slate-500 mt-1">Present in Source only</div>
+                        </div>
+                    </div>
+
+                    <!-- Card 5: Missing in Source -->
+                    <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Missing In Source</span>
+                        <div>
+                            <div class="text-2xl md:text-3xl font-extrabold text-blue-500">{{ results.summary.missing_in_source }}</div>
+                            <div class="text-xs text-slate-500 mt-1">Present in Target only</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ANALYTICS CHARTS PANEL -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="glass-card rounded-2xl p-6 lg:col-span-2">
+                        <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-4">Mismatches by Column</h4>
+                        <div class="h-64 relative">
+                            <canvas id="columnMismatchChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="glass-card rounded-2xl p-6">
+                        <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-4">Severity Breakdown</h4>
+                        <div class="h-64 relative flex items-center justify-center">
+                            <canvas id="severityBreakdownChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- SECTION 2: DETAILED MISMATCHES -->
+            <section id="mismatch-section" class="snap-section space-y-6 scroll-mt-6">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-xl font-extrabold text-slate-800 dark:text-slate-200">Field Level Discrepancies</h3>
+                        <p class="text-xs text-slate-500 mt-1">Showing mismatches identified in rows that exist in both files</p>
+                    </div>
+
+                    <!-- Advanced Filter Controls -->
+                    <div class="flex flex-wrap items-center gap-3">
+                        <!-- Search Mismatches -->
+                        <input type="text" id="mismatchSearch" placeholder="Search keys or columns..." 
+                               class="px-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48">
+
+                        <!-- Severity Filter Pills -->
+                        <div class="flex bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl border border-slate-200/50 dark:border-slate-800/50">
+                            <button onclick="filterMismatches('all')" id="pill-all" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white dark:bg-slate-900 shadow-sm text-indigo-600 dark:text-indigo-400">All</button>
+                            <button onclick="filterMismatches('Critical')" id="pill-critical" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">Critical</button>
+                            <button onclick="filterMismatches('Warning')" id="pill-warning" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">Warning</button>
+                            <button onclick="filterMismatches('Info')" id="pill-info" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">Info</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MISMATCHES ACCORDION TABLE -->
+                <div class="glass-card rounded-2xl overflow-hidden border border-slate-200/40 dark:border-slate-800/40">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse" id="mismatchTable">
+                            <thead>
+                                <tr class="bg-slate-100/50 dark:bg-slate-800/50 text-xs font-bold text-slate-500 uppercase border-b border-slate-200/40 dark:border-slate-800/40">
+                                    <th class="p-4 w-12"></th>
+                                    <th class="p-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/30" onclick="sortMismatches(1)">Row Key</th>
+                                    <th class="p-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/30" onclick="sortMismatches(2)">Column Name</th>
+                                    <th class="p-4 text-center">Severity</th>
+                                    <th class="p-4">Source Value</th>
+                                    <th class="p-4">Target Value</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-200/30 dark:divide-slate-800/30 text-sm" id="mismatchBody">
+                                {% for item in results.mismatches %}
+                                <tr class="mismatch-row hover:bg-slate-50/50 dark:hover:bg-slate-800/25 transition-colors cursor-pointer" 
+                                    data-severity="{{ item.severity }}" 
+                                    data-search="{{ item.row_key.lower() }}|{{ item.column.lower() }}"
+                                    onclick="toggleAccordion('acc-{{ loop.index }}')">
+                                    <td class="p-4 text-center">
+                                        <span id="arrow-acc-{{ loop.index }}" class="transition-transform inline-block text-slate-400 text-xs">▶</span>
+                                    </td>
+                                    <td class="p-4 font-mono font-medium text-slate-700 dark:text-slate-300">{{ item.row_key }}</td>
+                                    <td class="p-4 font-semibold text-slate-900 dark:text-slate-100">{{ item.column }}</td>
+                                    <td class="p-4 text-center">
+                                        <span class="px-2 py-0.5 rounded-full text-2xs font-extrabold uppercase
+                                            {% if item.severity == 'Critical' %}
+                                                bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border border-red-200/50 dark:border-red-800/30
+                                            {% elif item.severity == 'Warning' %}
+                                                bg-yellow-50 dark:bg-yellow-950/30 text-yellow-600 dark:text-yellow-400 border border-yellow-200/50 dark:border-yellow-800/30
+                                            {% else %}
+                                                bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/30
+                                            {% endif %}">
+                                            {{ item.severity }}
+                                        </span>
+                                    </td>
+                                    <td class="p-4 truncate max-w-xs text-red-600 dark:text-red-400 font-mono">{{ item.source_value }}</td>
+                                    <td class="p-4 truncate max-w-xs text-green-600 dark:text-green-400 font-mono">{{ item.target_value }}</td>
+                                </tr>
+                                <tr id="acc-{{ loop.index }}" class="hidden bg-slate-50/20 dark:bg-slate-900/10">
+                                    <td colspan="6" class="p-6">
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <!-- Character level diff comparison -->
+                                            <div class="space-y-3 p-4 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800/50 rounded-xl">
+                                                <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Inline Comparison (Character-Level Diff)</h5>
+                                                <div class="p-4 rounded bg-slate-50 dark:bg-slate-800/50 font-mono text-sm leading-relaxed whitespace-pre-wrap break-all">
+                                                    {{ item.diff_html | safe }}
+                                                </div>
+                                            </div>
+                                            <!-- Full Cell metadata -->
+                                            <div class="space-y-2 text-xs">
+                                                <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Mismatch Details</h5>
+                                                <div class="grid grid-cols-3 gap-2 py-1 border-b border-slate-200/30 dark:border-slate-800/30">
+                                                    <span class="text-slate-400 font-medium">Row Identifier</span>
+                                                    <span class="col-span-2 font-mono font-bold text-slate-700 dark:text-slate-300">{{ item.row_key }}</span>
+                                                </div>
+                                                <div class="grid grid-cols-3 gap-2 py-1 border-b border-slate-200/30 dark:border-slate-800/30">
+                                                    <span class="text-slate-400 font-medium">Column Affected</span>
+                                                    <span class="col-span-2 font-semibold text-slate-700 dark:text-slate-300">{{ item.column }}</span>
+                                                </div>
+                                                <div class="grid grid-cols-3 gap-2 py-1 border-b border-slate-200/30 dark:border-slate-800/30">
+                                                    <span class="text-slate-400 font-medium">Source value</span>
+                                                    <span class="col-span-2 text-red-500 font-mono font-bold">{{ item.source_value }}</span>
+                                                </div>
+                                                <div class="grid grid-cols-3 gap-2 py-1 border-b border-slate-200/30 dark:border-slate-800/30">
+                                                    <span class="text-slate-400 font-medium">Target value</span>
+                                                    <span class="col-span-2 text-green-500 font-mono font-bold">{{ item.target_value }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                                {% if not results.mismatches %}
+                                <tr>
+                                    <td colspan="6" class="p-8 text-center text-slate-400">
+                                        No discrepancies found in common records.
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 3: ORPHANS & DUPLICATES -->
+            <section id="orphans-section" class="snap-section space-y-6 scroll-mt-6">
+                <div class="border-b border-slate-200/50 dark:border-slate-800/50 pb-4">
+                    <h3 class="text-xl font-extrabold text-slate-800 dark:text-slate-200">Missing & Duplicate Records</h3>
+                    <p class="text-xs text-slate-500 mt-1">Track records present in one system only or containing duplicate keys</p>
+                </div>
+
+                <!-- Tabs header -->
+                <div class="flex flex-wrap gap-4 items-center justify-between">
+                    <div class="tab-btn-wrap flex p-1 bg-slate-100 dark:bg-slate-800/60 rounded-xl border border-slate-200/50 dark:border-slate-800/50 relative">
+                        <div id="tab-indicator" class="tab-indicator"></div>
+                        <button onclick="switchTab('tab-missing-target')" id="btn-missing-target" class="tab-btn active px-4 py-2 text-xs font-bold rounded-lg relative z-10 transition-colors">Missing in Target ({{ results.missing_in_target | length }})</button>
+                        <button onclick="switchTab('tab-missing-source')" id="btn-missing-source" class="tab-btn px-4 py-2 text-xs font-semibold rounded-lg relative z-10 transition-colors">Missing in Source ({{ results.missing_in_source | length }})</button>
+                        <button onclick="switchTab('tab-duplicates-src')" id="btn-duplicates-src" class="tab-btn px-4 py-2 text-xs font-semibold rounded-lg relative z-10 transition-colors">Source Duplicates ({{ results.duplicates_source | length }})</button>
+                        <button onclick="switchTab('tab-duplicates-tgt')" id="btn-duplicates-tgt" class="tab-btn px-4 py-2 text-xs font-semibold rounded-lg relative z-10 transition-colors">Target Duplicates ({{ results.duplicates_target | length }})</button>
+                    </div>
+                </div>
+
+                <!-- Tab panels -->
+                <div class="space-y-4">
+                    
+                    <!-- PANEL 1: MISSING IN TARGET -->
+                    <div id="tab-missing-target" class="tab-panel active">
+                        <div class="glass-card rounded-2xl p-6 overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-100/40 dark:bg-slate-800/40 text-xs font-bold text-slate-500 uppercase border-b border-slate-200/40 dark:border-slate-800/40">
+                                            <th class="p-4">Row Key</th>
+                                            <th class="p-4">Record Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-200/30 dark:divide-slate-800/30 text-sm font-mono">
+                                        {% for item in results.missing_in_target %}
+                                        <tr>
+                                            <td class="p-4 font-bold text-slate-800 dark:text-slate-200">{{ item.row_key }}</td>
+                                            <td class="p-4 text-xs text-slate-500">
+                                                <div class="max-h-24 overflow-y-auto scrollbar-thin">
+                                                    <div class="flex flex-wrap gap-1.5 py-1">
+                                                        {% for key, val in item.row_data.items() %}
+                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                                            <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500">{{ key }}:</span>
+                                                            <span class="font-mono text-slate-600 dark:text-slate-300">{{ val }}</span>
+                                                        </span>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% if not results.missing_in_target %}
+                                        <tr>
+                                            <td colspan="2" class="p-8 text-center text-slate-400">
+                                                No records missing in target.
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PANEL 2: MISSING IN SOURCE -->
+                    <div id="tab-missing-source" class="tab-panel">
+                        <div class="glass-card rounded-2xl p-6 overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-100/40 dark:bg-slate-800/40 text-xs font-bold text-slate-500 uppercase border-b border-slate-200/40 dark:border-slate-800/40">
+                                            <th class="p-4">Row Key</th>
+                                            <th class="p-4">Record Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-200/30 dark:divide-slate-800/30 text-sm font-mono">
+                                        {% for item in results.missing_in_source %}
+                                        <tr>
+                                            <td class="p-4 font-bold text-slate-800 dark:text-slate-200">{{ item.row_key }}</td>
+                                            <td class="p-4 text-xs text-slate-500">
+                                                <div class="max-h-24 overflow-y-auto scrollbar-thin">
+                                                    <div class="flex flex-wrap gap-1.5 py-1">
+                                                        {% for key, val in item.row_data.items() %}
+                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                                            <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500">{{ key }}:</span>
+                                                            <span class="font-mono text-slate-600 dark:text-slate-300">{{ val }}</span>
+                                                        </span>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% if not results.missing_in_source %}
+                                        <tr>
+                                            <td colspan="2" class="p-8 text-center text-slate-400">
+                                                No records missing in source.
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PANEL 3: SOURCE DUPLICATES -->
+                    <div id="tab-duplicates-src" class="tab-panel">
+                        <div class="glass-card rounded-2xl p-6 overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-100/40 dark:bg-slate-800/40 text-xs font-bold text-slate-500 uppercase border-b border-slate-200/40 dark:border-slate-800/40">
+                                            <th class="p-4">Row Key</th>
+                                            <th class="p-4">Record Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-200/30 dark:divide-slate-800/30 text-sm font-mono">
+                                        {% for item in results.duplicates_source %}
+                                        <tr>
+                                            <td class="p-4 font-bold text-red-500">{{ item._row_key }}</td>
+                                            <td class="p-4 text-xs text-slate-500">
+                                                <div class="max-h-24 overflow-y-auto scrollbar-thin">
+                                                    <div class="flex flex-wrap gap-1.5 py-1">
+                                                        {% for key, val in item.items() %}
+                                                            {% if key != '_row_key' %}
+                                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                                                <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500">{{ key }}:</span>
+                                                                <span class="font-mono text-slate-600 dark:text-slate-300">{{ val }}</span>
+                                                            </span>
+                                                            {% endif %}
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% if not results.duplicates_source %}
+                                        <tr>
+                                            <td colspan="2" class="p-8 text-center text-slate-400">
+                                                No duplicate keys found in source.
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PANEL 4: TARGET DUPLICATES -->
+                    <div id="tab-duplicates-tgt" class="tab-panel">
+                        <div class="glass-card rounded-2xl p-6 overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-100/40 dark:bg-slate-800/40 text-xs font-bold text-slate-500 uppercase border-b border-slate-200/40 dark:border-slate-800/40">
+                                            <th class="p-4">Row Key</th>
+                                            <th class="p-4">Record Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-200/30 dark:divide-slate-800/30 text-sm font-mono">
+                                        {% for item in results.duplicates_target %}
+                                        <tr>
+                                            <td class="p-4 font-bold text-red-500">{{ item._row_key }}</td>
+                                            <td class="p-4 text-xs text-slate-500">
+                                                <div class="max-h-24 overflow-y-auto scrollbar-thin">
+                                                    <div class="flex flex-wrap gap-1.5 py-1">
+                                                        {% for key, val in item.items() %}
+                                                            {% if key != '_row_key' %}
+                                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/50 dark:border-slate-700/50 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                                                <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500">{{ key }}:</span>
+                                                                <span class="font-mono text-slate-600 dark:text-slate-300">{{ val }}</span>
+                                                            </span>
+                                                            {% endif %}
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% if not results.duplicates_target %}
+                                        <tr>
+                                            <td colspan="2" class="p-8 text-center text-slate-400">
+                                                No duplicate keys found in target.
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- COMMAND PALETTE MODAL -->
+    <div id="cmd-palette" class="cmd-palette-overlay" aria-hidden="true">
+        <div class="cmd-palette-modal">
+            <div class="cmd-palette-input-wrap">
+                <svg class="w-5 h-5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                <input type="text" id="cmd-palette-input" placeholder="Type a command or column name..." class="cmd-palette-input">
+                <span class="cmd-palette-kbd">ESC</span>
+            </div>
+            <div id="cmd-palette-results" class="cmd-palette-results">
+                <!-- Dynamic results render here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- DATA SERIALIZATION SCRIPT FOR CLIENT-SIDE JS -->
+    <script>
+        window.FULL_REPORT_DATA = {{ full_report_data | tojson }};
+        window.COLUMN_CHARTS_DATA = {{ column_charts_data | tojson }};
+        window.SEVERITY_BREAKDOWN = {{ severity_breakdown | tojson }};
+    </script>
+
+    <!-- INTERACTION LOGIC SCRIPT -->
+    <script>
+        const htmlElement = document.documentElement;
+
+        // Theme management
+        function updateThemeButtonLabel() {
+            const btn = document.getElementById('themeToggle');
+            if (!btn) return;
+            const label = btn.querySelector('.sidebar-label');
+            const svgContainer = btn.querySelector('svg');
+            const isDark = htmlElement.classList.contains('dark');
+            
+            if (label) {
+                label.innerText = isDark ? 'Light Mode' : 'Dark Mode';
+            }
+            
+            if (svgContainer) {
+                if (isDark) {
+                    // Sun icon
+                    svgContainer.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z"></path>';
+                } else {
+                    // Moon icon
+                    svgContainer.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>';
+                }
+            }
+        }
+
+        function toggleTheme() {
+            htmlElement.classList.toggle('dark');
+            localStorage.theme = htmlElement.classList.contains('dark') ? 'dark' : 'light';
+            updateThemeButtonLabel();
+            updateChartColors();
+        }
+
+        // Initialize Theme from localStorage
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            htmlElement.classList.add('dark');
+        } else {
+            htmlElement.classList.remove('dark');
+        }
+
+        // Sidebar Collapse
+        const ARROW_LEFT  = 'M15 19l-7-7 7-7';
+        const ARROW_RIGHT = 'M9 5l7 7-7 7';
+
+        function updateArrow(collapsed) {
+            const path = document.querySelector('#sidebar-toggle-icon path');
+            if (path) path.setAttribute('d', collapsed ? ARROW_RIGHT : ARROW_LEFT);
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const contentArea = document.querySelector('.dock-content-area');
+            sidebar.classList.toggle('collapsed');
+            if (contentArea) contentArea.classList.toggle('collapsed');
+            const isCollapsed = sidebar.classList.contains('collapsed');
+            localStorage.sidebarCollapsed = isCollapsed;
+            updateArrow(isCollapsed);
+            setTimeout(moveTabIndicator, 350);
+        }
+
+        // Switch Tabs for Orphans/Duplicates
+        function switchTab(panelId) {
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            
+            document.getElementById(panelId).classList.add('active');
+            
+            // Highlight matching button
+            const btnId = panelId.replace('tab-', 'btn-');
+            const btn = document.getElementById(btnId);
+            if (btn) btn.classList.add('active');
+            
+            moveTabIndicator();
+        }
+
+        // Sliding tab indicator sizing
+        function moveTabIndicator() {
+            const indicator = document.getElementById('tab-indicator');
+            if (!indicator) return;
+            const activeBtn = document.querySelector('.tab-btn-wrap .tab-btn.active');
+            if (!activeBtn) return;
+            const wrap = activeBtn.parentElement;
+            const wrapRect = wrap.getBoundingClientRect();
+            const btnRect = activeBtn.getBoundingClientRect();
+            const offsetLeft = btnRect.left - wrapRect.left;
+            indicator.style.width = btnRect.width + 'px';
+            indicator.style.transform = `translateX(${offsetLeft}px)`;
+        }
+
+        // Theme Switch with Ripple Effect
+        function toggleThemeWithRipple() {
+            const btn = document.getElementById('themeToggle');
+            if (btn) {
+                const rect = btn.getBoundingClientRect();
+                const ripple = document.createElement('div');
+                ripple.className = 'theme-ripple';
+                const size = Math.max(window.innerWidth, window.innerHeight) * 2;
+                ripple.style.width = ripple.style.height = size + 'px';
+                ripple.style.left = (rect.left + rect.width / 2 - size / 2) + 'px';
+                ripple.style.top = (rect.top + rect.height / 2 - size / 2) + 'px';
+                document.body.appendChild(ripple);
+                document.documentElement.classList.add('theme-transitioning');
+                requestAnimationFrame(() => ripple.classList.add('expand'));
+                setTimeout(() => {
+                    document.documentElement.classList.remove('theme-transitioning');
+                    ripple.remove();
+                }, 750);
+            }
+            origToggleTheme();
+        }
+        
+        // Wrap theme switch override
+        const origToggleTheme = toggleTheme;
+        toggleTheme = toggleThemeWithRipple;
+
+        // Toggle Accordion Rows
+        function toggleAccordion(id) {
+            const row = document.getElementById(id);
+            const arrow = document.getElementById('arrow-' + id);
+            
+            if (row.classList.contains('hidden')) {
+                row.classList.remove('hidden');
+                if (arrow) arrow.innerText = '▼';
+            } else {
+                row.classList.add('hidden');
+                if (arrow) arrow.innerText = '▶';
+            }
+        }
+
+        // Filter Discrepancies Table
+        let activeSeverity = 'all';
+        
+        function filterMismatches(severity) {
+            activeSeverity = severity;
+            
+            // Update UI pills
+            document.querySelectorAll('.tab-btn-wrap button, .flex button').forEach(b => {
+                if(b.id.startsWith('pill-')) {
+                    b.classList.remove('bg-white', 'dark:bg-slate-900', 'shadow-sm', 'text-indigo-600', 'dark:text-indigo-400', 'active');
+                    b.classList.add('text-slate-500');
+                }
+            });
+            
+            const activePill = document.getElementById('pill-' + severity.toLowerCase());
+            if (activePill) {
+                activePill.classList.remove('text-slate-500');
+                activePill.classList.add('bg-white', 'dark:bg-slate-900', 'shadow-sm', 'text-indigo-600', 'dark:text-indigo-400', 'active');
+            }
+            
+            applyAllFilters();
+        }
+
+        document.getElementById('mismatchSearch').addEventListener('input', applyAllFilters);
+
+        function applyAllFilters() {
+            const searchVal = document.getElementById('mismatchSearch').value.toLowerCase();
+            const rows = document.querySelectorAll('.mismatch-row');
+            
+            rows.forEach(row => {
+                const rowSev = row.getAttribute('data-severity');
+                const rowSearch = row.getAttribute('data-search');
+                const accId = row.getAttribute('onclick').match(/'([^']+)'/)[1];
+                const accRow = document.getElementById(accId);
+                
+                const matchesSeverity = (activeSeverity === 'all' || rowSev === activeSeverity);
+                const matchesSearch = rowSearch.includes(searchVal);
+                
+                if (matchesSeverity && matchesSearch) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                    accRow.classList.add('hidden');
+                    const arrow = document.getElementById('arrow-' + accId);
+                    if (arrow) arrow.innerText = '▶';
+                }
+            });
+        }
+
+        // Table column sorting
+        let currentSortDir = 1;
+        function sortMismatches(colIdx) {
+            const tbody = document.getElementById('mismatchBody');
+            const rows = Array.from(tbody.querySelectorAll('.mismatch-row'));
+            
+            currentSortDir = -currentSortDir;
+            
+            rows.sort((a, b) => {
+                const valA = a.cells[colIdx].innerText.toLowerCase();
+                const valB = b.cells[colIdx].innerText.toLowerCase();
+                return valA.localeCompare(valB) * currentSortDir;
+            });
+            
+            rows.forEach(row => {
+                const accId = row.getAttribute('onclick').match(/'([^']+)'/)[1];
+                const accRow = document.getElementById(accId);
+                tbody.appendChild(row);
+                tbody.appendChild(accRow);
+            });
+        }
+
+        // Section Navigation
+        function navigateToSection(id) {
+            const target = document.getElementById(id);
+            if (!target) return;
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            
+            // Update active nav button
+            document.querySelectorAll('.dock-nav-item').forEach(l => l.classList.remove('nav-active-floating'));
+            const activeNav = document.querySelector(`[data-nav-id="${id}"]`);
+            if (activeNav) activeNav.classList.add('nav-active-floating');
+        }
+
+        // ScrollSpy to update active navigation links during page scroll
+        const scrollContainer = document.getElementById('scroll-container');
+        scrollContainer.addEventListener('scroll', () => {
+            const sections = ['overview-section', 'mismatch-section', 'orphans-section'];
+            let currentSec = sections[0];
+            const threshold = scrollContainer.getBoundingClientRect().top + 120;
+            
+            sections.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.top <= threshold && rect.bottom > threshold) {
+                        currentSec = id;
+                    }
+                }
+            });
+            
+            document.querySelectorAll('.dock-nav-item').forEach(l => l.classList.remove('nav-active-floating'));
+            const activeNav = document.querySelector(`[data-nav-id="${currentSec}"]`);
+            if (activeNav) activeNav.classList.add('nav-active-floating');
+        });
+
+        // Chart.js Chart Rendering
+        let colMismatchChart, severityBreakdownChart;
+        
+        function drawCharts() {
+            const ctxCol = document.getElementById('columnMismatchChart').getContext('2d');
+            const ctxSev = document.getElementById('severityBreakdownChart').getContext('2d');
+            
+            const isDark = htmlElement.classList.contains('dark');
+            const textColor = isDark ? '#94a3b8' : '#64748b';
+            const gridColor = isDark ? 'rgba(71, 85, 105, 0.15)' : 'rgba(226, 232, 240, 0.5)';
+            
+            // 1. Column chart
+            const colLabels = Object.keys(window.COLUMN_CHARTS_DATA);
+            const colData = Object.values(window.COLUMN_CHARTS_DATA);
+            
+            colMismatchChart = new Chart(ctxCol, {
+                type: 'bar',
+                data: {
+                    labels: colLabels,
+                    datasets: [{
+                        label: 'Discrepancies Count',
+                        data: colData,
+                        backgroundColor: 'rgba(99, 102, 241, 0.7)',
+                        borderColor: 'rgb(99, 102, 241)',
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: gridColor },
+                            ticks: { color: textColor }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: textColor }
+                        }
+                    }
+                }
+            });
+            
+            // 2. Severity Pie Chart
+            const sevLabels = Object.keys(window.SEVERITY_BREAKDOWN);
+            const sevData = Object.values(window.SEVERITY_BREAKDOWN);
+            
+            severityBreakdownChart = new Chart(ctxSev, {
+                type: 'doughnut',
+                data: {
+                    labels: sevLabels,
+                    datasets: [{
+                        data: sevData,
+                        backgroundColor: [
+                            'rgba(239, 68, 68, 0.75)',    // Critical -> Red
+                            'rgba(234, 179, 8, 0.75)',    // Warning -> Yellow
+                            'rgba(59, 130, 246, 0.75)'    // Info -> Blue
+                        ],
+                        borderWidth: isDark ? 2 : 1,
+                        borderColor: isDark ? '#161b22' : '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: textColor, font: { weight: 'bold', size: 11 } }
+                        }
+                    },
+                    cutout: '65%'
+                }
+            });
+        }
+
+        function updateChartColors() {
+            if (colMismatchChart && severityBreakdownChart) {
+                colMismatchChart.destroy();
+                severityBreakdownChart.destroy();
+            }
+            drawCharts();
+        }
+
+        // SheetJS Client-side Excel Downloader
+        function downloadExcelReport() {
+            try {
+                if (typeof XLSX === 'undefined') {
+                    showToast('Excel library not loaded yet.', 'error');
+                    return;
+                }
+                
+                const data = window.FULL_REPORT_DATA;
+                const wb = XLSX.utils.book_new();
+
+                // Sheet 1: Summary Sheet
+                const summaryData = [
+                    ['Reconciliation Summary Report', ''],
+                    ['', ''],
+                    ['Source File', data.summary.source_file],
+                    ['Target File', data.summary.target_file],
+                    ['Run Timestamp', data.summary.run_time],
+                    ['Primary Keys Used', data.summary.primary_keys],
+                    ['', ''],
+                    ['Metric', 'Count'],
+                    ['Total Rows (Source)', data.summary.total_source_rows],
+                    ['Total Rows (Target)', data.summary.total_target_rows],
+                    ['Fully Matched Rows', data.summary.matched_rows],
+                    ['Mismatched Rows', data.summary.mismatched_rows],
+                    ['Missing in Target', data.summary.missing_in_target],
+                    ['Missing in Source', data.summary.missing_in_source],
+                    ['Duplicates (Source)', data.summary.duplicate_source],
+                    ['Duplicates (Target)', data.summary.duplicate_target]
+                ];
+                const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
+                XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+
+                // Sheet 2: Mismatches
+                const mismatchRows = [['Row Key', 'Column Name', 'Source Value', 'Target Value', 'Severity']];
+                data.mismatches.forEach(m => {
+                    mismatchRows.push([m.row_key, m.column, m.source_value, m.target_value, m.severity]);
+                });
+                const mismatchWs = XLSX.utils.aoa_to_sheet(mismatchRows);
+                XLSX.utils.book_append_sheet(wb, mismatchWs, 'Mismatches');
+
+                // Sheet 3: Missing in Target
+                const missingTargetRows = [['Row Key', 'Record Data (JSON)']];
+                data.missing_in_target.forEach(m => {
+                    missingTargetRows.push([m.row_key, JSON.stringify(m.row_data)]);
+                });
+                const missingTargetWs = XLSX.utils.aoa_to_sheet(missingTargetRows);
+                XLSX.utils.book_append_sheet(wb, missingTargetWs, 'Missing In Target');
+
+                // Sheet 4: Missing in Source
+                const missingSourceRows = [['Row Key', 'Record Data (JSON)']];
+                data.missing_in_source.forEach(m => {
+                    missingSourceRows.push([m.row_key, JSON.stringify(m.row_data)]);
+                });
+                const missingSourceWs = XLSX.utils.aoa_to_sheet(missingSourceRows);
+                XLSX.utils.book_append_sheet(wb, missingSourceWs, 'Missing In Source');
+
+                // Sheet 5: Duplicates (Source)
+                if (data.duplicates_source.length > 0) {
+                    const dupSrcRows = [['Row Key', 'Record Data (JSON)']];
+                    data.duplicates_source.forEach(d => {
+                        dupSrcRows.push([d._row_key, JSON.stringify(d)]);
+                    });
+                    const dupSrcWs = XLSX.utils.aoa_to_sheet(dupSrcRows);
+                    XLSX.utils.book_append_sheet(wb, dupSrcWs, 'Duplicates Source');
+                }
+
+                // Sheet 6: Duplicates (Target)
+                if (data.duplicates_target.length > 0) {
+                    const dupTgtRows = [['Row Key', 'Record Data (JSON)']];
+                    data.duplicates_target.forEach(d => {
+                        dupTgtRows.push([d._row_key, JSON.stringify(d)]);
+                    });
+                    const dupTgtWs = XLSX.utils.aoa_to_sheet(dupTgtRows);
+                    XLSX.utils.book_append_sheet(wb, dupTgtWs, 'Duplicates Target');
+                }
+
+                XLSX.writeFile(wb, 'data_reconciliation_report.xlsx');
+                showToast('Excel report downloaded successfully');
+            } catch (e) {
+                console.error('Excel export error:', e);
+                showToast('Failed to generate Excel report.', 'error');
+            }
+        }
+
+        // Show Toast Function
+        function showToast(message, type = 'success') {
+            const existing = document.getElementById('toast-notification');
+            if (existing) existing.remove();
+
+            const icon = type === 'success' 
+                ? '<svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>'
+                : '<svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>';
+
+            const toast = document.createElement('div');
+            toast.id = 'toast-notification';
+            toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 z-[999] opacity-100 transition-opacity duration-300';
+            toast.innerHTML = `
+                <div class="flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl border text-sm font-bold bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+                    ${icon}
+                    <span>${message}</span>
+                </div>
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
+        // COMMAND PALETTE LOGIC (Ctrl+K)
+        const cmdPalette = document.getElementById('cmd-palette');
+        const cmdInput = document.getElementById('cmd-palette-input');
+        const cmdResults = document.getElementById('cmd-palette-results');
+        
+        let cmdSelectedIndex = 0;
+        let cmdFilteredItems = [];
+
+        function getCmdItems() {
+            return [
+                { section: 'Navigation', label: 'Scroll to Overview', keywords: 'kpi home top summary', action: () => navigateToSection('overview-section') },
+                { section: 'Navigation', label: 'Scroll to Discrepancies Table', keywords: 'mismatches fields cell', action: () => navigateToSection('mismatch-section') },
+                { section: 'Navigation', label: 'Scroll to Missing/Duplicates Panels', keywords: 'orphans cards duplicated source target', action: () => navigateToSection('orphans-section') },
+                { section: 'Actions', label: 'Download Excel Report', keywords: 'export download save xlsx', action: () => downloadExcelReport() },
+                { section: 'Actions', label: 'Toggle Dark Mode', keywords: 'theme transition contrast background', action: () => toggleTheme() }
+            ];
+        }
+
+        function renderCmdResults(items) {
+            if (!items || items.length === 0) {
+                cmdResults.innerHTML = '<div class="cmd-palette-empty py-4 text-center text-xs text-slate-400">No matches found</div>';
+                cmdFilteredItems = [];
+                return;
+            }
+            cmdFilteredItems = items;
+            if (cmdSelectedIndex >= items.length) cmdSelectedIndex = 0;
+            if (cmdSelectedIndex < 0) cmdSelectedIndex = items.length - 1;
+
+            let lastSection = '';
+            let html = '';
+            items.forEach((item, idx) => {
+                if (item.section !== lastSection) {
+                    html += `<div class="px-4 py-1.5 text-2xs font-extrabold uppercase text-slate-400 tracking-wider">${item.section}</div>`;
+                    lastSection = item.section;
+                }
+                const isSelected = idx === cmdSelectedIndex;
+                html += `
+                    <div class="flex items-center gap-3 px-4 py-2.5 rounded-xl cursor-pointer text-xs font-semibold select-none
+                        ${isSelected ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100/50 dark:hover:bg-slate-800/30'}"
+                        onclick="runCmdAction(${idx})">
+                        <svg class="w-4 h-4 shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        <span>${item.label}</span>
+                    </div>
+                `;
+            });
+            cmdResults.innerHTML = html;
+        }
+
+        function runCmdAction(idx) {
+            if (cmdFilteredItems[idx]) {
+                cmdFilteredItems[idx].action();
+                closeCommandPalette();
+            }
+        }
+
+        function openCommandPalette() {
+            cmdPalette.classList.add('open');
+            cmdPalette.setAttribute('aria-hidden', 'false');
+            cmdInput.value = '';
+            cmdSelectedIndex = 0;
+            renderCmdResults(getCmdItems());
+            setTimeout(() => cmdInput.focus(), 50);
+        }
+
+        function closeCommandPalette() {
+            cmdPalette.classList.remove('open');
+            cmdPalette.setAttribute('aria-hidden', 'true');
+        }
+
+        cmdPalette.addEventListener('click', (e) => {
+            if (e.target === cmdPalette) closeCommandPalette();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                if (cmdPalette.classList.contains('open')) closeCommandPalette();
+                else openCommandPalette();
+            }
+            if (e.key === 'Escape' && cmdPalette.classList.contains('open')) {
+                e.preventDefault();
+                closeCommandPalette();
+            }
+        });
+
+        cmdInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase().strip();
+            const all = getCmdItems();
+            cmdSelectedIndex = 0;
+            if (!term) {
+                renderCmdResults(all);
+                return;
+            }
+            const filtered = all.filter(item => 
+                item.label.toLowerCase().includes(term) || 
+                item.keywords.toLowerCase().includes(term)
+            );
+            renderCmdResults(filtered);
+        });
+
+        cmdInput.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                cmdSelectedIndex = (cmdSelectedIndex + 1) % cmdFilteredItems.length;
+                renderCmdResults(cmdFilteredItems);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                cmdSelectedIndex = (cmdSelectedIndex - 1 + cmdFilteredItems.length) % cmdFilteredItems.length;
+                renderCmdResults(cmdFilteredItems);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                runCmdAction(cmdSelectedIndex);
+            }
+        });
+
+        // Document Load Initialisation
+        document.addEventListener('DOMContentLoaded', () => {
+            // Check saved sidebar state
+            const isCollapsed = localStorage.sidebarCollapsed === 'true';
+            if (isCollapsed) {
+                document.getElementById('sidebar').classList.add('collapsed');
+                const contentArea = document.querySelector('.dock-content-area');
+                if (contentArea) contentArea.classList.add('collapsed');
+                updateArrow(true);
+            }
+            
+            updateThemeButtonLabel();
+            drawCharts();
+            moveTabIndicator();
+            
+            // Switch tab to missing-target on start
+            switchTab('tab-missing-target');
+        });
+
+        window.addEventListener('resize', moveTabIndicator);
+    </script>
+</body>
+</html>

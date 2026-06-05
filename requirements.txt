@@ -1,0 +1,20 @@
+# LLM & Agent Framework
+langchain
+langchain-openai
+langchain-community
+
+# Data Processing
+pandas
+openpyxl
+
+# UI & UX
+rich
+
+# Templating & Utilities
+jinja2
+python-dotenv
+chardet
+
+# Testing
+pytest
+pytest-cov
