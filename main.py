@@ -11,8 +11,12 @@ if sys.platform.startswith("win"):
     try:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
-    except Exception:
+    except AttributeError:
         pass
+    except (AttributeError, LookupError, UnicodeError) as e:
+        logging.getLogger("reconciliation_agent.main").warning(
+            "Failed to reconfigure stdout/stderr encoding: %s", e
+        )
 
 from rich.console import Console
 from rich.panel import Panel
@@ -21,15 +25,7 @@ from rich.markdown import Markdown
 from rich.columns import Columns
 from rich.text import Text
 
-import config
-from config import OPENAI_MODEL
-
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("openai").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("langchain").setLevel(logging.WARNING)
-
-from agent import get_reconciliation_agent
+from config import OPENAI_MODEL, configure_logging
 
 logger = logging.getLogger("reconciliation_agent.main")
 console = Console()
@@ -181,6 +177,20 @@ def print_reconciliation_table():
 
 
 def main():
+    """Entry point for the ReconAgent CLI chatbot.
+
+    Configures logging and library loggers, initialises the agent, then runs
+    the interactive prompt loop with slash-command and error handling.
+    """
+    configure_logging()
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("langchain").setLevel(logging.WARNING)
+
+    from agent import get_reconciliation_agent
+
     print_welcome_banner()
 
     try:

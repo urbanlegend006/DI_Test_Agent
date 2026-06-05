@@ -1,15 +1,20 @@
+import json
 import pytest
 import pandas as pd
-import json
-from pathlib import Path
 from tools import SESSION_STATE
 
 @pytest.fixture(autouse=True)
 def clean_session_state():
-    """Fixture to reset the global session state before and after each test."""
+    """Fixture to reset the global session state before and after each test.
+
+    Uses try/finally to guarantee cleanup even if a test raises an exception,
+    preventing state leakage across tests.
+    """
     SESSION_STATE.reset()
-    yield
-    SESSION_STATE.reset()
+    try:
+        yield
+    finally:
+        SESSION_STATE.reset()
 
 @pytest.fixture
 def mock_source_df():
@@ -36,14 +41,14 @@ def temp_files(tmp_path, mock_source_df, mock_target_df):
     """Fixture to create temporary files for testing ingestion tools."""
     src_csv = tmp_path / "source.csv"
     tgt_json = tmp_path / "target.json"
-    
+
     mock_source_df.to_csv(src_csv, index=False)
-    
+
     # Save target as a JSON list of records
     target_records = mock_target_df.to_dict(orient="records")
-    with open(tgt_json, "w", encoding="utf-8") as f:
+    with tgt_json.open("w", encoding="utf-8") as f:
         json.dump(target_records, f, indent=2)
-        
+
     return {
         "source_csv": src_csv,
         "target_json": tgt_json

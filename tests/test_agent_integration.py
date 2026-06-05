@@ -11,7 +11,6 @@ Tests that the agent:
 import pytest
 import os
 from unittest.mock import patch, MagicMock
-from pathlib import Path
 
 from tools import SESSION_STATE
 
@@ -31,11 +30,11 @@ def test_agent_init_raises_on_missing_api_key():
 def test_agent_init_with_valid_key():
     """Agent should initialize without error when a key is present."""
     with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key-for-unit-test"):
-        with patch("agent.ChatOpenAI") as MockLLM:
+        with patch("agent.ChatOpenAI") as mock_llm:
             # Mock the LLM so we don't actually connect
             mock_llm_instance = MagicMock()
             mock_llm_instance.bind_tools = MagicMock(return_value=mock_llm_instance)
-            MockLLM.return_value = mock_llm_instance
+            mock_llm.return_value = mock_llm_instance
 
             from agent import get_reconciliation_agent
             executor = get_reconciliation_agent()
@@ -53,12 +52,12 @@ def test_agent_init_with_valid_key():
 def test_system_prompt_contains_workflow():
     """The system prompt should instruct the agent on the correct workflow."""
     from agent import get_reconciliation_agent
-    
+
     with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key"):
-        with patch("agent.ChatOpenAI") as MockLLM:
+        with patch("agent.ChatOpenAI") as mock_llm:
             mock_llm_instance = MagicMock()
             mock_llm_instance.bind_tools = MagicMock(return_value=mock_llm_instance)
-            MockLLM.return_value = mock_llm_instance
+            mock_llm.return_value = mock_llm_instance
 
             executor = get_reconciliation_agent()
 
@@ -66,7 +65,7 @@ def test_system_prompt_contains_workflow():
             # We can inspect it through the agent
             agent = executor.agent
             prompt = agent.get_prompts()[0] if hasattr(agent, 'get_prompts') else None
-            
+
             if prompt is not None:
                 # Reconstruct prompt text
                 messages = prompt.messages
@@ -122,7 +121,7 @@ def test_full_toolchain_pipeline(temp_files):
     result_html = generate_report.invoke({"format": "html"})
     assert "Success" in result_html or "report" in result_html.lower()
     # Verify the HTML file was actually created
-    assert any("html" in result_html.lower() for _ in [1])
+    assert "html" in result_html.lower()
 
     # Step 4: Generate Excel report and verify the file is actually created
     result_excel = generate_report.invoke({"format": "excel"})
@@ -132,8 +131,6 @@ def test_full_toolchain_pipeline(temp_files):
     import os
     import glob
     from openpyxl import load_workbook
-    excel_files = glob.glob(os.path.join(os.path.dirname(temp_files["source_csv"]), "**", "*.xlsx"), recursive=True)
-    # Excel file was generated in REPORTS_DIR (project root), so look there
     import config
     excel_reports = glob.glob(os.path.join(config.REPORTS_DIR, "*.xlsx"))
     assert len(excel_reports) >= 1, "No Excel report was generated"
@@ -223,25 +220,25 @@ def test_system_prompt_contains_guiding_rules():
 def test_model_configured_with_temperature_zero():
     """ChatOpenAI should be initialised with temperature=0 for consistent outputs."""
     with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key-for-unit-test"):
-        with patch("agent.ChatOpenAI") as MockLLM:
+        with patch("agent.ChatOpenAI") as mock_llm:
             mock_llm_instance = MagicMock()
             mock_llm_instance.bind_tools = MagicMock(return_value=mock_llm_instance)
-            MockLLM.return_value = mock_llm_instance
+            mock_llm.return_value = mock_llm_instance
 
             from agent import get_reconciliation_agent
             get_reconciliation_agent()
 
-            MockLLM.assert_called_once()
-            _call_kwargs = MockLLM.call_args.kwargs
+            mock_llm.assert_called_once()
+            _call_kwargs = mock_llm.call_args.kwargs
             assert _call_kwargs.get("temperature") == 0
 
 
 def test_agent_binds_all_three_tools():
     """The LLM should receive all three tools bound for tool calling."""
     with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key-for-unit-test"):
-        with patch("agent.ChatOpenAI") as MockLLM:
+        with patch("agent.ChatOpenAI") as mock_llm:
             mock_llm_instance = MagicMock()
-            MockLLM.return_value = mock_llm_instance
+            mock_llm.return_value = mock_llm_instance
 
             from agent import get_reconciliation_agent
             executor = get_reconciliation_agent()

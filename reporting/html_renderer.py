@@ -24,19 +24,19 @@ def render_html_report(session_state, output_dir: Path) -> Path:
     source_fullpath = session_state.source_fullpath
     target_fullpath = session_state.target_fullpath
     tolerance_settings = session_state.tolerance_settings
-    
+
     # 1. Prepare Chart.js data
     # Count severity counts
     sev_counts = {"Critical": 0, "Warning": 0, "Info": 0}
     for m in results["mismatches"]:
         sev_counts[m["severity"]] += 1
-        
+
     # Count mismatch columns
-    col_counts = {}
+    col_counts: dict[str, int] = {}
     for m in results["mismatches"]:
         col = m["column"]
         col_counts[col] = col_counts.get(col, 0) + 1
-        
+
     # 2. Structure full_report_data for client-side SheetJS excel export
     run_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_report_data = {
@@ -68,12 +68,12 @@ def render_html_report(session_state, output_dir: Path) -> Path:
         "duplicates_source": results["duplicates_source"],
         "duplicates_target": results["duplicates_target"]
     }
-    
+
     # Load Template
     template_dir = Path(__file__).parent.parent / "templates"
     env = Environment(loader=FileSystemLoader(template_dir))
     template = env.get_template("report.html")
-    
+
     # Render HTML content
     html_content = template.render(
         run_time=run_time_str,
@@ -88,13 +88,13 @@ def render_html_report(session_state, output_dir: Path) -> Path:
         column_charts_data=col_counts,
         severity_breakdown=sev_counts
     )
-    
+
     # Output to reports directory
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     output_file = output_dir / f"recon_{timestamp}.html"
-    
-    with open(output_file, "w", encoding="utf-8") as f:
+
+    with output_file.open("w", encoding="utf-8") as f:
         f.write(html_content)
-        
+
     logger.info("Successfully wrote HTML report to %s", output_file)
     return output_file

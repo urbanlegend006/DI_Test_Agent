@@ -1,5 +1,3 @@
-import json
-import pytest
 from tools import SESSION_STATE
 from tools.run_reconciliation import run_reconciliation, get_char_diff_html
 from utils.data_normalizer import align_columns
@@ -8,10 +6,10 @@ def test_get_char_diff_html():
     diff1 = get_char_diff_html("Apple", "Abple")
     assert '<span class="diff-del">p</span>' in diff1
     assert '<span class="diff-add">b</span>' in diff1
-    
+
     diff2 = get_char_diff_html("", "Apple")
     assert '<span class="diff-add">Apple</span>' in diff2
-    
+
     diff3 = get_char_diff_html("Apple", "")
     assert '<span class="diff-del">Apple</span>' in diff3
 
@@ -46,7 +44,7 @@ def test_run_reconciliation_success(mock_source_df, mock_target_df):
     assert results['summary']['missing_in_source'] == 1 # 004 (Dates) is in target only
     assert results['summary']['duplicate_source'] == 2 # 005 duplicate row count
     assert results['summary']['duplicate_target'] == 2 # 006 duplicate row count
-    
+
     # Check mismatches structure
     assert len(results['mismatches']) == 1
     mismatch = results['mismatches'][0]

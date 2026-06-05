@@ -4,7 +4,7 @@ from utils.key_detector import is_column_unique, detect_primary_key
 def test_is_column_unique():
     df = pd.DataFrame([{"id": "01"}, {"id": "02"}, {"id": "01"}])
     assert is_column_unique(df, "id") is False
-    
+
     df_uniq = pd.DataFrame([{"id": "01"}, {"id": "02"}, {"id": "03"}])
     assert is_column_unique(df_uniq, "id") is True
 
@@ -15,7 +15,7 @@ def test_detect_primary_key_single():
         {"id": "002", "name": "Banana", "value": 2}
     ])
     assert detect_primary_key(df) == ["id"]
-    
+
     # Capitalized PK candidate
     df_cap = pd.DataFrame([
         {"PK": "001", "name": "Apple"},
@@ -31,7 +31,7 @@ def test_detect_primary_key_composite():
         {"batch": "B", "param": "timer", "value": 15},
         {"batch": "B", "param": "temp", "value": 25}
     ])
-    
+
     # Unique composite key containing batch and param indicators should be found
     keys = detect_primary_key(df)
     assert keys is not None

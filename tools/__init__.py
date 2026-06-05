@@ -7,7 +7,7 @@ type-checkable.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import pandas as pd
@@ -28,7 +28,7 @@ class SessionContext:
     comp_target: Optional[pd.DataFrame] = None
 
     # Column-alignment metadata
-    align_meta: Optional[dict] = None
+    align_meta: Optional[dict[str, Any]] = None
 
     # File metadata
     source_filename: Optional[str] = None
@@ -37,12 +37,12 @@ class SessionContext:
     target_fullpath: Optional[str] = None
 
     # Reconciliation inputs
-    detected_keys: Optional[list] = None
-    primary_key_cols: Optional[list] = None
-    tolerance_settings: Optional[dict] = None
+    detected_keys: Optional[list[str]] = None
+    primary_key_cols: Optional[list[str]] = None
+    tolerance_settings: Optional[dict[str, Any]] = None
 
     # Reconciliation output
-    reconciliation_results: Optional[dict] = None
+    reconciliation_results: Optional[dict[str, Any]] = None
 
     # UI state
     _recon_table_shown: bool = False

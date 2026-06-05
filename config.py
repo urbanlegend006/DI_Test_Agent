@@ -22,43 +22,47 @@ REPORT_RETENTION_DAYS = int(os.getenv("REPORT_RETENTION_DAYS", "7"))
 REPORTS_DIR = ROOT_DIR / "reports"
 LOGS_DIR = ROOT_DIR / "logs"
 
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
-
-# Configure dual logging: console via RichHandler and file logging via RotatingFileHandler
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
-# Setup root logger
-root_logger = logging.getLogger()
-root_logger.setLevel(LOG_LEVEL)
-
-# Clean up existing handlers to avoid duplicates
-for handler in list(root_logger.handlers):
-    root_logger.removeHandler(handler)
-
-# Create console handler (Rich) - default to WARNING to keep CLI interface clean
-console_log_level = os.getenv("CONSOLE_LOG_LEVEL", "WARNING").upper()
-console_handler = RichHandler(rich_tracebacks=True, markup=True)
-console_handler.setLevel(getattr(logging, console_log_level, logging.WARNING))
-root_logger.addHandler(console_handler)
-
-# Create rotating file handler - 10MB per file, keep 5 backups (50MB total max)
-file_handler = RotatingFileHandler(
-    LOGS_DIR / "app.log",
-    maxBytes=10 * 1024 * 1024,
-    backupCount=5,
-    encoding="utf-8",
-)
-file_handler.setFormatter(logging.Formatter(log_format))
-file_handler.setLevel(LOG_LEVEL)
-root_logger.addHandler(file_handler)
-
 logger = logging.getLogger("reconciliation_agent")
-logger.info("Logging configured. Log level: %s, Console level: %s", LOG_LEVEL, console_log_level)
 
 
-def cleanup_old_reports(retention_days: int = None) -> int:
+def configure_logging() -> None:
+    """Set up directories, loggers, and handlers.
+
+    Call once at application startup (e.g. from ``main()``) rather than at
+    import time, so that importing ``config`` does not trigger filesystem
+    writes or destroy existing logging handlers.
+    """
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+
+    if root_logger.hasHandlers():
+        return
+
+    console_log_level = os.getenv("CONSOLE_LOG_LEVEL", "WARNING").upper()
+    console_handler = RichHandler(rich_tracebacks=True, markup=True)
+    console_handler.setLevel(getattr(logging, console_log_level, logging.WARNING))
+    root_logger.addHandler(console_handler)
+
+    file_handler = RotatingFileHandler(
+        LOGS_DIR / "app.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter(log_format))
+    file_handler.setLevel(log_level)
+    root_logger.addHandler(file_handler)
+
+    logger.info("Logging configured. Log level: %s, Console level: %s", log_level, console_log_level)
+
+
+def cleanup_old_reports(retention_days: int | None = None) -> int:
     """Remove report files older than ``retention_days`` days.
 
     Args:
@@ -85,7 +89,7 @@ def cleanup_old_reports(retention_days: int = None) -> int:
                 deleted += 1
         if deleted:
             logger.info("Cleaned up %d old report(s) older than %d days", deleted, retention_days)
-    except Exception as e:
+    except OSError as e:
         logger.warning("Failed to clean up old reports: %s", e)
 
     return deleted

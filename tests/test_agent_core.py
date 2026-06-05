@@ -3,8 +3,7 @@
 Tests the wrapper class independently from the agent initialization
 to verify backward compatibility, config handling, and error resilience.
 """
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from langchain_core.prompts import ChatPromptTemplate
 from agent import ReconciliationAgentWrapper, SYSTEM_PROMPT

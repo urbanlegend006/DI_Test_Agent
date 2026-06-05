@@ -1,18 +1,19 @@
 import logging
+from typing import Any
 import pandas as pd
 import numpy as np
 
 logger = logging.getLogger("reconciliation_agent.data_normalizer")
 
-def clean_value(val):
+def clean_value(val: Any) -> Any:
     """Clean a single cell value for comparison."""
     if pd.isna(val) or val is None:
         return ""
-    
+
     # If it is a string, trim whitespace
     if isinstance(val, str):
         return val.strip()
-        
+
     return val
 
 def is_date_like(val) -> bool:
@@ -25,31 +26,26 @@ def is_date_like(val) -> bool:
     if val_clean.isdigit() and len(val_clean) <= 4:
         return False
     has_sep = any(char in val_clean for char in ['-', '/', ':', ','])
-    has_month = any(m in val_clean.lower() for m in ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])
+    has_month = any(
+        m in val_clean.lower()
+        for m in ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+    )
     return has_sep or has_month
 
-def should_not_convert_to_numeric(series: pd.Series) -> bool:
-    """Check if any value in the series has a leading zero and is longer than 1 character."""
-    for x in series:
-        if isinstance(x, str):
-            s = x.strip()
-            if len(s) > 1 and s.startswith('0') and s.isdigit():
-                return True
-    return False
 
-
-def try_parse_datetime(val):
+def try_parse_datetime(val: Any) -> Any:
     """Try to parse a value into a datetime. Returns the parsed datetime or original value."""
     if isinstance(val, (int, float)) or pd.isna(val) or val == "":
         return val
-        
+
     if isinstance(val, pd.Timestamp):
         return val
-        
+
     val_str = str(val).strip()
     if not is_date_like(val_str):
         return val
-        
+
     try:
         # Common date formats
         return pd.to_datetime(val_str)
@@ -86,17 +82,17 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             if is_string_col:
                 # Quick string check: any non-empty value
                 non_empty = s[s != ""]
-                if not non_empty.empty and non_empty.apply(lambda x: isinstance(x, str)).all():
+                if not non_empty.empty:
                     # Check if all values look like dates (sample first 50 for speed)
                     sample = non_empty.head(50)
-                    if sample.apply(is_date_like).all():
+                    if sample.map(is_date_like).all():
                         parsed = pd.to_datetime(s, errors='coerce')
                         valid_count = parsed.notna().sum()
                         if valid_count > 0 and (valid_count / len(non_empty)) >= 0.5:
                             norm_df[col] = parsed.where(parsed.notna(), np.nan)
                             logger.debug("Column '%s' parsed as datetime", col)
                             continue
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
             logger.debug("Failed checking datetime format for col '%s': %s", col, e)
 
         # Try to parse string numbers to actual float/int where possible
@@ -108,7 +104,7 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
             if is_string_col:
                 non_empty = s[s != ""]
-                if not non_empty.empty and non_empty.apply(lambda x: isinstance(x, str)).all():
+                if not non_empty.empty:
                     parsed = pd.to_numeric(s, errors='coerce')
                     valid_count = parsed.notna().sum()
                     # Original semantics: ratio of valid parses to non-empty count.
@@ -117,7 +113,7 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                         norm_df[col] = parsed
                         logger.debug("Column '%s' cast to numeric", col)
                         continue
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
             logger.debug("Failed checking numeric format for col '%s': %s", col, e)
 
         norm_df[col] = s
@@ -144,30 +140,30 @@ def _series_has_leading_zeros(series: pd.Series) -> bool:
 
 def align_columns(source_df: pd.DataFrame, target_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Align column names between Source and Target DataFrames.
-    
+
     Matches columns case-insensitively and ignoring underscores/spaces.
     Returns:
         (aligned_source, aligned_target, alignment_metadata)
     """
     logger.info("Aligning columns between Source and Target")
-    
+
     src_cols = list(source_df.columns)
     tgt_cols = list(target_df.columns)
-    
+
     def normalize_name(name):
         return str(name).strip().lower().replace("_", "").replace(" ", "").replace("-", "")
-        
+
     normalized_src = {normalize_name(c): c for c in src_cols}
     normalized_tgt = {normalize_name(c): c for c in tgt_cols}
-    
+
     aligned_src_cols = []
     aligned_tgt_cols = []
-    
+
     # Store alignment map
     alignment_map = {}
     extra_in_source = []
     extra_in_target = []
-    
+
     # Find matching columns and direct maps
     for norm_name, src_name in normalized_src.items():
         if norm_name in normalized_tgt:
@@ -177,27 +173,27 @@ def align_columns(source_df: pd.DataFrame, target_df: pd.DataFrame) -> tuple[pd.
             aligned_tgt_cols.append(tgt_name)
         else:
             extra_in_source.append(src_name)
-            
+
     for norm_name, tgt_name in normalized_tgt.items():
         if norm_name not in normalized_src:
             extra_in_target.append(tgt_name)
-            
-    logger.info("Aligned %d columns. Extra in Source: %s, Extra in Target: %s", 
+
+    logger.info("Aligned %d columns. Extra in Source: %s, Extra in Target: %s",
                 len(alignment_map), extra_in_source, extra_in_target)
-                
+
     # Reindex and rename dataframes for comparison
     # Rename target columns to match source names for the matching columns
     rename_dict = {tgt: src for src, tgt in alignment_map.items()}
-    
+
     # Create final comparative dataframes
     comp_source = source_df[aligned_src_cols].copy()
     comp_target = target_df[aligned_tgt_cols].copy().rename(columns=rename_dict)
-    
+
     metadata = {
         "alignment_map": alignment_map,
         "extra_in_source": extra_in_source,
         "extra_in_target": extra_in_target,
         "aligned_columns": aligned_src_cols
     }
-    
+
     return comp_source, comp_target, metadata

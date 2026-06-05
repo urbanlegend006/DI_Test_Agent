@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
@@ -13,15 +13,23 @@ from tools.generate_report import generate_report
 
 logger = logging.getLogger("reconciliation_agent.agent")
 
+
+@runtime_checkable
+class AgentGraph(Protocol):
+    """Minimal protocol for the compiled agent graph."""
+    def invoke(self, state: dict, config: dict | None = None) -> dict: ...
+
+
 class ReconciliationAgentWrapper:
     """Wrapper to maintain backward compatibility with AgentExecutor's interface."""
-    def __init__(self, graph: Any, tools: list, system_prompt: str):
+    def __init__(self, graph: AgentGraph, tools: list[Any], system_prompt: str):
         self.graph = graph
         self.tools = tools
         self.system_prompt = system_prompt
 
     @property
     def agent(self):
+        """Return ``self`` for backward compatibility with ``AgentExecutor``."""
         return self
 
     def get_prompts(self):
@@ -31,8 +39,21 @@ class ReconciliationAgentWrapper:
         ])
         return [prompt]
 
-    def invoke(self, input_dict: dict, config: dict = None) -> dict:
-        """Invokes the compiled agent graph with history-preserving memory."""
+    def invoke(self, input_dict: dict, config: dict[str, Any] | None = None) -> dict:
+        """Invoke the compiled agent graph with history-preserving memory.
+
+        Accepts the caller's ``config`` dict without mutating it, injects a
+        default ``thread_id`` when none is present, and wraps graph errors
+        into graceful ``{"output": …}`` responses.
+
+        Args:
+            input_dict: Must contain an ``"input"`` key with the user message.
+            config: Optional LangGraph runtime configuration dict.
+
+        Returns:
+            Dictionary with an ``"output"`` key containing the agent's text
+            response or an error message.
+        """
         config = dict(config) if config is not None else {}
         config.setdefault("configurable", {})
         config["configurable"].setdefault("thread_id", "reconciliation-session")
@@ -68,11 +89,14 @@ SYSTEM_PROMPT = (
     "and proceed to step 2. Do NOT ask for the second path again.\n"
     "2. Call the `analyze_files` tool with Source and Target paths to load and understand file structures.\n"
     "3. Review the outputs. If a primary key was not auto-detected (or if multiple candidates were found), "
-    "   prompt the user to specify or confirm the column(s) to use as the primary key. You can support composite keys (comma-separated).\n"
-    "4. Ask the user if they want exact matching (strict) or fuzzy matching (with custom tolerances for numeric or date differences).\n"
+     "   prompt the user to specify or confirm the column(s) to use "
+     "as the primary key. You can support composite keys (comma-separated).\n"
+    "4. Ask the user if they want exact matching (strict) or fuzzy matching "
+    "(with custom tolerances for numeric or date differences).\n"
     "5. Call the `run_reconciliation` tool with the primary key and tolerance settings.\n"
     "6. Display a detailed summary of the reconciliation findings to the user.\n"
-    "7. Call the `generate_report` tool to create the final report. Offer the user a choice between HTML (default) or Excel.\n"
+    "7. Call the `generate_report` tool to create the final report. "
+    "Offer the user a choice between HTML (default) or Excel.\n"
     "8. Provide the final absolute file path link clearly to the user.\n\n"
     "IMPORTANT: When the user says 'compare', 'reconcile', 'find differences', "
     "'match files', or similar, you MUST proceed through the FULL workflow "
@@ -106,26 +130,26 @@ SYSTEM_PROMPT = (
 def get_reconciliation_agent() -> ReconciliationAgentWrapper:
     """Configures and returns the LangChain tool-calling Agent graph wrapper."""
     logger.info("Initializing LangChain reconciliation agent using model %s", OPENAI_MODEL)
-    
+
     # 1. Define LLM
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY environment variable is not set. Please check your .env file.")
-        
+
     llm = ChatOpenAI(
-        model=OPENAI_MODEL, 
-        temperature=0, 
+        model=OPENAI_MODEL,
+        temperature=0,
         api_key=OPENAI_API_KEY
     )
-    
+
     # 2. Define prompt structure
     system_prompt = SYSTEM_PROMPT
-    
+
     # 3. Setup tools
     tools = [analyze_files, run_reconciliation, generate_report]
-    
+
     # 4. Setup checkpointer for memory
     checkpointer = MemorySaver()
-    
+
     # 5. Create compiled agent graph
     graph = create_agent(
         model=llm,
@@ -133,9 +157,9 @@ def get_reconciliation_agent() -> ReconciliationAgentWrapper:
         system_prompt=system_prompt,
         checkpointer=checkpointer
     )
-    
+
     # 6. Wrap for AgentExecutor backward compatibility
     executor = ReconciliationAgentWrapper(graph, tools, system_prompt)
-    
+
     logger.info("Agent graph successfully initialized.")
     return executor
