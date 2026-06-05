@@ -5,6 +5,11 @@ import numpy as np
 
 logger = logging.getLogger("reconciliation_agent.data_normalizer")
 
+_MONTH_ABBREVIATIONS = frozenset({
+    'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+    'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+})
+
 def clean_value(val: Any) -> Any:
     """Clean a single cell value for comparison."""
     if pd.isna(val) or val is None:
@@ -26,11 +31,7 @@ def is_date_like(val) -> bool:
     if val_clean.isdigit() and len(val_clean) <= 4:
         return False
     has_sep = any(char in val_clean for char in ['-', '/', ':', ','])
-    has_month = any(
-        m in val_clean.lower()
-        for m in ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
-                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-    )
+    has_month = any(m in val_clean.lower() for m in _MONTH_ABBREVIATIONS)
     return has_sep or has_month
 
 

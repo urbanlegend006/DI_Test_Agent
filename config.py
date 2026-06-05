@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -71,8 +72,6 @@ def cleanup_old_reports(retention_days: int | None = None) -> int:
     Returns:
         Number of files deleted.
     """
-    import time
-
     if retention_days is None:
         retention_days = REPORT_RETENTION_DAYS
 

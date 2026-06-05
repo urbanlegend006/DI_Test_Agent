@@ -93,7 +93,7 @@ def get_char_diff_html(val1: Any, val2: Any) -> str:
 # Key indexing helpers
 # ---------------------------------------------------------------------------
 
-def _normalize_single_key(val) -> str:
+def _normalize_single_key(val: Any) -> str:
     if pd.isna(val) or val is None:
         return ""
     val_str = str(val).strip()
@@ -122,7 +122,10 @@ def _generate_raw_index_key(df: pd.DataFrame, keys: list[str]) -> pd.Series:
     return combined
 
 
-def _build_key_mappings(src_keys, src_raw_keys, tgt_keys, tgt_raw_keys):
+def _build_key_mappings(
+    src_keys: pd.Series, src_raw_keys: pd.Series,
+    tgt_keys: pd.Series, tgt_raw_keys: pd.Series,
+) -> callable:
     """Build normalized-to-original key mappings and a display-key resolver."""
     norm_to_orig_src = dict(zip(src_keys, src_raw_keys, strict=True))
     norm_to_orig_tgt = dict(zip(tgt_keys, tgt_raw_keys, strict=True))
@@ -137,7 +140,12 @@ def _build_key_mappings(src_keys, src_raw_keys, tgt_keys, tgt_raw_keys):
     return get_display_key
 
 
-def _detect_duplicates(src_keys, tgt_keys, source_df, target_df, comp_source, comp_target, get_display_key):
+def _detect_duplicates(
+    src_keys: pd.Series, tgt_keys: pd.Series,
+    source_df: pd.DataFrame, target_df: pd.DataFrame,
+    comp_source: pd.DataFrame, comp_target: pd.DataFrame,
+    get_display_key: callable,
+) -> dict:
     """Detect and separate duplicate rows from clean data."""
     src_dup_mask = src_keys.duplicated(keep=False)
     tgt_dup_mask = tgt_keys.duplicated(keep=False)
@@ -168,10 +176,12 @@ def _detect_duplicates(src_keys, tgt_keys, source_df, target_df, comp_source, co
 
 
 def _find_missing_rows(
-    missing_in_target_keys, missing_in_source_keys,
-    src_keys_clean, tgt_keys_clean,
-    source_df, target_df, src_dup_mask, tgt_dup_mask, get_display_key,
-):
+    missing_in_target_keys: set, missing_in_source_keys: set,
+    src_keys_clean: pd.Series, tgt_keys_clean: pd.Series,
+    source_df: pd.DataFrame, target_df: pd.DataFrame,
+    src_dup_mask: pd.Series, tgt_dup_mask: pd.Series,
+    get_display_key: callable,
+) -> tuple[list[dict], list[dict]]:
     """Find rows missing in target and source."""
     orig_src_clean = source_df[~src_dup_mask].copy()
     orig_tgt_clean = target_df[~tgt_dup_mask].copy()
@@ -200,9 +210,11 @@ def _find_missing_rows(
 
 
 def _compare_columns(
-    comp_src_clean, comp_tgt_clean, common_keys_set,
-    key_cols, get_display_key, tolerance_dict,
-):
+    comp_src_clean: pd.DataFrame, comp_tgt_clean: pd.DataFrame,
+    common_keys_set: set,
+    key_cols: list[str], get_display_key: callable,
+    tolerance_dict: dict | None,
+) -> tuple[list[dict], int, int, dict]:
     """Vectorized per-column comparison returning mismatches and stats."""
     mismatches = []
     col_mismatch_stats = {
@@ -260,7 +272,7 @@ def _compare_columns(
     return mismatches, matched_count, mismatched_count, col_mismatch_stats
 
 
-def _render_summary(results, mismatches) -> str:
+def _render_summary(results: dict, mismatches: list[dict]) -> str:
     """Render the reconciliation results as a text summary."""
     summary = results["summary"]
     terminal = (
