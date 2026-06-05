@@ -62,7 +62,7 @@ class ReconciliationAgentWrapper:
         if user_input is None:
             return {"output": "Error: 'input' key is missing from the request."}
 
-        user_msg = HumanMessage(content=user_input)
+        user_msg = HumanMessage(content=str(user_input))
         state = {"messages": [user_msg]}
 
         try:

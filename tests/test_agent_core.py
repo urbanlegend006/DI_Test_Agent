@@ -5,6 +5,7 @@ to verify backward compatibility, config handling, and error resilience.
 """
 from unittest.mock import MagicMock
 
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from agent import ReconciliationAgentWrapper, SYSTEM_PROMPT
 
@@ -140,3 +141,95 @@ def test_system_prompt_is_constant_string():
     """SYSTEM_PROMPT should be a non-empty string."""
     assert isinstance(SYSTEM_PROMPT, str)
     assert len(SYSTEM_PROMPT) > 100
+
+
+# ---------- Full-turn roundtrip ----------
+
+def test_invoke_full_turn_roundtrip():
+    """Wrapper should route input through graph and return the last message content.
+
+    Simulates a complete turn: user message -> tool call -> tool result ->
+    final answer. The wrapper should extract only the final AI message.
+    """
+    mock_graph = MagicMock()
+    messages = [
+        HumanMessage(content="reconcile a.csv vs b.csv"),
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "analyze_files", "args": {}, "id": "call_1"}],
+        ),
+        AIMessage(content="Reconciliation complete! All rows matched."),
+    ]
+    mock_graph.invoke.return_value = {"messages": messages}
+
+    wrapper = ReconciliationAgentWrapper(
+        graph=mock_graph,
+        tools=[],
+        system_prompt=""
+    )
+    result = wrapper.invoke({"input": "reconcile a.csv vs b.csv"})
+
+    assert result["output"] == "Reconciliation complete! All rows matched."
+
+    # Verify graph was called with the right state structure
+    _call_args = mock_graph.invoke.call_args
+    state_arg = _call_args[0][0]
+    assert "messages" in state_arg
+    assert isinstance(state_arg["messages"][0], HumanMessage)
+    assert "reconcile" in state_arg["messages"][0].content
+
+
+# ---------- Response contract ----------
+
+def test_invoke_response_always_has_output_key():
+    """Invoke should always return a dict with an ``output`` key, even on errors."""
+    scenarios = [
+        ("missing input key", {"graph": MagicMock(), "input": {"foo": "bar"}}),
+        ("empty messages", {
+            "graph": MagicMock(**{"invoke.return_value": {"messages": []}}),
+            "input": {"input": "hello"},
+        }),
+        ("graph raises KeyError", {
+            "graph": MagicMock(**{"invoke.side_effect": KeyError("boom")}),
+            "input": {"input": "hello"},
+        }),
+        ("graph raises generic exception", {
+            "graph": MagicMock(**{"invoke.side_effect": RuntimeError("fail")}),
+            "input": {"input": "hello"},
+        }),
+    ]
+
+    for name, cfg in scenarios:
+        wrapper = ReconciliationAgentWrapper(
+            graph=cfg["graph"],
+            tools=[],
+            system_prompt=""
+        )
+        result = wrapper.invoke(cfg["input"])
+        assert isinstance(result, dict), f"{name}: result is not a dict"
+        assert "output" in result, f"{name}: missing 'output' key"
+        assert isinstance(result["output"], str), f"{name}: output is not a string"
+        assert len(result["output"]) > 0, f"{name}: output is empty"
+
+
+# ---------- Non-string input handling ----------
+
+def test_invoke_non_string_input():
+    """Wrapper should coerce non-string ``input`` values into HumanMessage content."""
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {"messages": [AIMessage(content="42")]}
+
+    wrapper = ReconciliationAgentWrapper(
+        graph=mock_graph,
+        tools=[],
+        system_prompt=""
+    )
+
+    result = wrapper.invoke({"input": 42})
+    assert result["output"] == "42"
+
+    # Verify the HumanMessage was created with str(42)
+    _call_args = mock_graph.invoke.call_args
+    msg = _call_args[0][0]["messages"][0]
+    assert isinstance(msg, HumanMessage)
+    assert msg.content == "42", "HumanMessage content should be stringified"

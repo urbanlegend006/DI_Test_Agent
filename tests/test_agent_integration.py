@@ -247,3 +247,60 @@ def test_agent_binds_all_three_tools():
             assert "analyze_files" in tool_names
             assert "run_reconciliation" in tool_names
             assert "generate_report" in tool_names
+
+
+# ---------- Additional LLM Configuration & Prompt Tests ----------
+
+def test_agent_uses_checkpointer():
+    """Agent graph should be created with a MemorySaver checkpointer."""
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
+    with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key"):
+        with patch("agent.ChatOpenAI") as mock_llm:
+            mock_llm_instance = MagicMock()
+            mock_llm_instance.bind_tools = MagicMock(return_value=mock_llm_instance)
+            mock_llm.return_value = mock_llm_instance
+
+            with patch("agent.MemorySaver") as mock_memory:
+                mock_memory_instance = MagicMock(spec=BaseCheckpointSaver)
+                mock_memory.return_value = mock_memory_instance
+
+                from agent import get_reconciliation_agent
+                executor = get_reconciliation_agent()
+
+                mock_memory.assert_called_once()
+                assert hasattr(executor, "graph")
+                assert executor.graph is not None
+
+
+def test_system_prompt_auto_proceed():
+    """System prompt must instruct the agent to auto-proceed when both paths are given."""
+    from agent import SYSTEM_PROMPT
+    assert "extract both paths immediately" in SYSTEM_PROMPT
+    assert "proceed to step 2" in SYSTEM_PROMPT.lower()
+    assert "Do NOT ask for the second path again" in SYSTEM_PROMPT
+
+
+def test_system_prompt_error_handling():
+    """System prompt must instruct the agent to explain errors without crashing."""
+    from agent import SYSTEM_PROMPT
+    assert "explain the issue clearly" in SYSTEM_PROMPT
+    assert "Do not crash" in SYSTEM_PROMPT
+
+
+def test_system_prompt_hallucination_guard():
+    """System prompt must contain hallucination prevention instructions."""
+    from agent import SYSTEM_PROMPT
+    assert "Never hallucinate" in SYSTEM_PROMPT
+    assert "Rely ONLY on tool outputs" in SYSTEM_PROMPT
+
+
+def test_system_prompt_output_summary():
+    """System prompt must instruct the agent to show a summary with all required metrics."""
+    from agent import SYSTEM_PROMPT
+    assert "matched count" in SYSTEM_PROMPT.lower()
+    assert "mismatched count" in SYSTEM_PROMPT.lower()
+    assert "missing in source" in SYSTEM_PROMPT.lower()
+    assert "missing in target" in SYSTEM_PROMPT.lower()
+    assert "severity breakdown" in SYSTEM_PROMPT.lower()
+    assert "table format" in SYSTEM_PROMPT.lower() or "bulleted" in SYSTEM_PROMPT.lower()
