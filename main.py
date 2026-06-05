@@ -4,6 +4,8 @@ import logging
 import warnings
 from datetime import datetime
 
+import openai
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -230,22 +232,25 @@ def main():
             console.print("\n[bold red]Process interrupted by user. Exiting...[/bold red]")
             sys.exit(0)
 
-        except Exception as e:
-            error_msg = str(e)
-            logger.exception("Error in CLI chat loop")
+        except openai.AuthenticationError:
+            console.print(Panel(
+                "[bold red]Authentication Failed[/bold red]\n\n"
+                "Your OpenAI API key is invalid or has expired.\n"
+                "Please update the [bold cyan]OPENAI_API_KEY[/bold cyan] in your [bold cyan].env[/bold cyan] file "
+                "with a valid key from [link=https://platform.openai.com/account/api-keys]platform.openai.com[/link].",
+                title="[bold red]\u26a0 API Key Error[/bold red]",
+                border_style="red"
+            ))
 
-            if "AuthenticationError" in type(e).__name__ or "401" in error_msg or "api_key" in error_msg.lower():
-                console.print(Panel(
-                    "[bold red]Authentication Failed[/bold red]\n\n"
-                    "Your OpenAI API key is invalid or has expired.\n"
-                    "Please update the [bold cyan]OPENAI_API_KEY[/bold cyan] in your [bold cyan].env[/bold cyan] file "
-                    "with a valid key from [link=https://platform.openai.com/account/api-keys]platform.openai.com[/link].",
-                    title="[bold red]\u26a0 API Key Error[/bold red]",
-                    border_style="red"
-                ))
-            else:
-                console.print(f"\n[bold red]An unexpected error occurred: {error_msg}[/bold red]")
-                console.print("[yellow]Please check the logs at logs/app.log for details.[/yellow]")
+        except openai.APIError as e:
+            logger.exception("OpenAI API error")
+            console.print(f"\n[bold red]OpenAI API error: {e}[/bold red]")
+            console.print("[yellow]Please check the logs at logs/app.log for details.[/yellow]")
+
+        except Exception as e:
+            logger.exception("Error in CLI chat loop")
+            console.print(f"\n[bold red]An unexpected error occurred: {e}[/bold red]")
+            console.print("[yellow]Please check the logs at logs/app.log for details.[/yellow]")
 
             console.print()
 

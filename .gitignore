@@ -11,5 +11,7 @@ utils/__pycache__
 .coverage
 sample.html
 logs/*.log
+.mypy_cache/
+.ruff_cache/
 
 

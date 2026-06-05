@@ -1,28 +1,27 @@
 import logging
 import re
+import functools
 from typing import Any
 import pandas as pd
 
 logger = logging.getLogger("reconciliation_agent.severity_classifier")
 
-# Cache for datetime parsing results - avoids repeated pd.to_datetime() on same values
-_DATETIME_CACHE: dict = {}
-_DATETIME_CACHE_MAX = 4096
 _PUNCTUATION_PATTERN = re.compile(r"[\s_\-/()]")
 
 
 def _cached_to_datetime(val) -> pd.Timestamp | None:
-    """Internal cached datetime parser."""
-    key = val if isinstance(val, (str, int, float, bool)) else None
-    if key is not None and key in _DATETIME_CACHE:
-        return _DATETIME_CACHE[key]
+    if not isinstance(val, (str, int, float, bool)):
+        return _cached_to_datetime_impl(val)
+    return _cached_to_datetime_impl(val)
+
+
+@functools.lru_cache(maxsize=4096)
+def _cached_to_datetime_impl(val: str | int | float | bool) -> pd.Timestamp | None:
+    """Cached datetime parser."""
     try:
-        result = pd.to_datetime(val)
+        return pd.to_datetime(val)
     except (ValueError, TypeError):
-        result = None
-    if key is not None and len(_DATETIME_CACHE) < _DATETIME_CACHE_MAX:
-        _DATETIME_CACHE[key] = result
-    return result
+        return None
 
 
 def safe_float(val: Any) -> float | None:

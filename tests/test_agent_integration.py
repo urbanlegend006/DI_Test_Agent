@@ -78,7 +78,7 @@ def test_system_prompt_contains_workflow():
 
 # ---------- Test 4: Full tool-chain pipeline (no LLM needed) ----------
 
-def test_full_toolchain_pipeline(temp_files):
+def test_full_toolchain_pipeline(temp_files, tmp_path):
     """
     Tests the entire reconciliation pipeline by calling tools directly
     in the order the agent would call them, verifying each step produces
@@ -87,6 +87,7 @@ def test_full_toolchain_pipeline(temp_files):
     from tools.analyze_files import analyze_files
     from tools.run_reconciliation import run_reconciliation
     from tools.generate_report import generate_report
+    from pathlib import Path
 
     src_path = str(temp_files["source_csv"])
     tgt_path = str(temp_files["target_json"])
@@ -118,23 +119,20 @@ def test_full_toolchain_pipeline(temp_files):
     assert isinstance(results["missing_in_source"], list)
 
     # Step 3: Generate HTML report
-    result_html = generate_report.invoke({"format": "html"})
+    result_html = generate_report.invoke({"format": "html", "output_dir": str(tmp_path)})
     assert "Success" in result_html or "report" in result_html.lower()
     # Verify the HTML file was actually created
     assert "html" in result_html.lower()
 
     # Step 4: Generate Excel report and verify the file is actually created
-    result_excel = generate_report.invoke({"format": "excel"})
+    result_excel = generate_report.invoke({"format": "excel", "output_dir": str(tmp_path)})
     assert "Success" in result_excel or "excel" in result_excel.lower()
 
     # Verify Excel file exists and contains expected sheets
-    import os
-    import glob
     from openpyxl import load_workbook
-    import config
-    excel_reports = glob.glob(os.path.join(config.REPORTS_DIR, "*.xlsx"))
+    excel_reports = list(Path(tmp_path).glob("*.xlsx"))
     assert len(excel_reports) >= 1, "No Excel report was generated"
-    latest_xlsx = max(excel_reports, key=os.path.getmtime)
+    latest_xlsx = max(excel_reports, key=lambda p: p.stat().st_mtime)
     wb = load_workbook(latest_xlsx)
     assert "Summary" in wb.sheetnames
     assert "Mismatches" in wb.sheetnames
