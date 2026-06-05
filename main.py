@@ -9,7 +9,10 @@ import openai
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-if sys.platform.startswith("win"):
+def _configure_windows_stdio() -> None:
+    """Configure UTF-8 console streams on Windows at application startup."""
+    if not sys.platform.startswith("win"):
+        return
     try:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
@@ -143,12 +146,12 @@ def _refresh_thread_id() -> None:
     SESSION_STATE._session_generation = 0
 
 
-def _preprocess_input(user_input: str) -> str | None:
+def _preprocess_input(user_input: str) -> dict | None:
     """Preprocess user input before passing it to the LLM.
 
     Returns ``None`` if the input was handled (e.g. off-topic) and the
     caller should continue without invoking the agent.  Otherwise returns
-    the (possibly augmented) message to pass to the LLM.
+    the structured request payload to pass to the agent wrapper.
     """
     from tools import SESSION_STATE
 
@@ -161,13 +164,100 @@ def _preprocess_input(user_input: str) -> str | None:
     paths = extract_paths(user_input)
     if len(paths) >= 2:
         SESSION_STATE._extracted_paths = paths[:2]
-        augmented = (
-        f"[Extracted paths: source={paths[0]!r}, target={paths[1]!r}]\n"
-        f"{user_input}"
-        )
-        return augmented
+        return {
+            "input": user_input,
+            "source_path": paths[0],
+            "target_path": paths[1],
+            "report_format": _requested_report_format(user_input),
+        }
 
-    return user_input
+    return {
+        "input": user_input,
+        "report_format": _requested_report_format(user_input),
+    }
+
+
+def _requested_report_format(user_input: str) -> str:
+    """Return requested report format, defaulting to HTML."""
+    text = user_input.lower()
+    if "excel" in text or ".xlsx" in text:
+        return "excel"
+    return "html"
+
+
+def _print_tool_result(result: str) -> None:
+    """Render deterministic tool output using the same Markdown surface as agent output."""
+    console.print(Markdown(f" 🤖 {result}"))
+    print_reconciliation_table()
+    console.print()
+
+
+def _handle_deterministic_shortcut(user_input: str) -> bool:
+    """Handle command-like reconciliation instructions without an LLM call."""
+    from tools import SESSION_STATE
+    from tools.run_reconciliation import run_reconciliation
+    from tools.generate_report import generate_report
+
+    text = user_input.strip()
+    lower = text.lower()
+
+    if lower.startswith("use key "):
+        primary_key = text[len("use key "):].strip()
+        if not primary_key:
+            console.print("[yellow]Please provide a primary key after 'use key'.[/yellow]")
+            return True
+        recon_result = run_reconciliation.invoke({
+            "primary_key": primary_key,
+            "tolerance": "strict",
+        })
+        report_result = ""
+        if SESSION_STATE.reconciliation_results is not None:
+            report_result = "\n\n" + generate_report.invoke({"format": "html"})
+        _print_tool_result(recon_result + report_result)
+        return True
+
+    if lower == "generate excel":
+        result = generate_report.invoke({"format": "excel"})
+        _print_tool_result(result)
+        return True
+
+    if lower == "rerun strict":
+        if not SESSION_STATE.primary_key_cols:
+            console.print("[yellow]No previous primary key is available. Use 'use key <column>' first.[/yellow]")
+            return True
+        primary_key = ", ".join(SESSION_STATE.primary_key_cols)
+        recon_result = run_reconciliation.invoke({
+            "primary_key": primary_key,
+            "tolerance": "strict",
+        })
+        report_result = ""
+        if SESSION_STATE.reconciliation_results is not None:
+            report_result = "\n\n" + generate_report.invoke({"format": "html"})
+        _print_tool_result(recon_result + report_result)
+        return True
+
+    if lower == "switch source/target":
+        if SESSION_STATE.source_df is None or SESSION_STATE.target_df is None:
+            console.print("[yellow]No loaded Source/Target files are available to switch.[/yellow]")
+            return True
+        SESSION_STATE.source_df, SESSION_STATE.target_df = SESSION_STATE.target_df, SESSION_STATE.source_df
+        SESSION_STATE.comp_source, SESSION_STATE.comp_target = SESSION_STATE.comp_target, SESSION_STATE.comp_source
+        SESSION_STATE.source_filename, SESSION_STATE.target_filename = (
+            SESSION_STATE.target_filename,
+            SESSION_STATE.source_filename,
+        )
+        SESSION_STATE.source_fullpath, SESSION_STATE.target_fullpath = (
+            SESSION_STATE.target_fullpath,
+            SESSION_STATE.source_fullpath,
+        )
+        SESSION_STATE.reconciliation_results = None
+        SESSION_STATE.report_path = None
+        SESSION_STATE.report_format = None
+        SESSION_STATE.workflow_state = "analyzed"
+        console.print("[green]Source and Target have been switched. Use 'rerun strict' or 'use key <column>' to compare again.[/green]\n")
+        return True
+
+    return False
 
 
 def get_status_bar():
@@ -222,6 +312,7 @@ def main():
     Configures logging and library loggers, initialises the agent, then runs
     the interactive prompt loop with slash-command and error handling.
     """
+    _configure_windows_stdio()
     configure_logging()
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -256,14 +347,17 @@ def main():
                 console.print("\n[bold red]Exiting chatbot loop. Goodbye![/bold red]")
                 sys.exit(0)
 
+            if _handle_deterministic_shortcut(user_input):
+                continue
+
             # Preprocess: guardrails + path extraction (may short-circuit)
-            augmented_input = _preprocess_input(user_input)
-            if augmented_input is None:
+            agent_request = _preprocess_input(user_input)
+            if agent_request is None:
                 console.print()
                 continue
 
             console.print("[bold green]Agent thinking...[/bold green]")
-            response = agent_executor.invoke({"input": augmented_input})
+            response = agent_executor.invoke(agent_request)
             agent_response = response.get("output", "No response received.")
             tool_calls = response.get("tool_calls", [])
 

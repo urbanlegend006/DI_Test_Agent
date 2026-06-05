@@ -1,6 +1,5 @@
 import logging
 import uuid
-import re
 from typing import Any, Protocol, runtime_checkable
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
@@ -45,23 +44,68 @@ class ReconciliationAgentWrapper:
         return [prompt]
 
     @staticmethod
-    def _extract_metadata(output: str) -> dict[str, str] | None:
-        """Parse ``[METADATA]...[/METADATA]`` block from agent output."""
-        m = re.search(r'\[METADATA\](.*?)\[/METADATA\]', output, re.DOTALL)
-        if not m:
-            return None
-        meta: dict[str, str] = {}
-        for line in m.group(1).strip().splitlines():
-            if ':' in line:
-                key, _, val = line.partition(':')
-                meta[key.strip()] = val.strip()
-        return meta
-
-    @staticmethod
     def _current_thread_id() -> str:
         """Return the thread ID from ``SESSION_STATE`` or generate a fresh one."""
         tid: str = getattr(SESSION_STATE, "session_thread_id", None) or uuid.uuid4().hex
         return tid
+
+    @staticmethod
+    def _session_metadata() -> dict[str, str]:
+        """Build deterministic response metadata from the current session state."""
+        summary = {}
+        if SESSION_STATE.reconciliation_results:
+            summary = SESSION_STATE.reconciliation_results.get("summary", {})
+        return {
+            "workflow_state": SESSION_STATE.workflow_state,
+            "matched": str(summary.get("matched_rows", 0)),
+            "mismatched": str(summary.get("mismatched_rows", 0)),
+            "missing_in_source": str(summary.get("missing_in_source", 0)),
+            "missing_in_target": str(summary.get("missing_in_target", 0)),
+            "report_path": SESSION_STATE.report_path or "none",
+            "report_format": SESSION_STATE.report_format or "none",
+        }
+
+    @staticmethod
+    def _requested_report_format(input_dict: dict) -> str:
+        """Infer requested report format from structured input or user text."""
+        explicit = str(input_dict.get("report_format") or "").strip().lower()
+        if explicit in {"html", "excel"}:
+            return explicit
+
+        user_text = str(input_dict.get("input") or "").lower()
+        if "excel" in user_text or ".xlsx" in user_text:
+            return "excel"
+        return "html"
+
+    @staticmethod
+    def _build_user_content(input_dict: dict) -> str:
+        """Create the HumanMessage content, preserving structured path hints."""
+        user_input = str(input_dict.get("input"))
+        source_path = input_dict.get("source_path")
+        target_path = input_dict.get("target_path")
+        if source_path and target_path:
+            return (
+                "User request:\n"
+                f"{user_input}\n\n"
+                "Structured inputs:\n"
+                f"source_path: {source_path}\n"
+                f"target_path: {target_path}"
+            )
+        return user_input
+
+    def _generate_default_report_if_needed(self, input_dict: dict) -> str | None:
+        """Generate a report after reconciliation when one does not exist yet."""
+        if SESSION_STATE.reconciliation_results is None:
+            return None
+        if SESSION_STATE.report_path:
+            return None
+
+        fmt = self._requested_report_format(input_dict)
+        output_dir = input_dict.get("output_dir")
+        args: dict[str, Any] = {"format": fmt}
+        if output_dir:
+            args["output_dir"] = str(output_dir)
+        return generate_report.invoke(args)
 
     def invoke(self, input_dict: dict, config: dict[str, Any] | None = None) -> dict:
         config = dict(config) if config is not None else {}
@@ -82,9 +126,13 @@ class ReconciliationAgentWrapper:
 
         user_input = input_dict.get("input")
         if user_input is None:
-            return {"output": "Error: 'input' key is missing from the request.", "tool_calls": []}
+            return {
+                "output": "Error: 'input' key is missing from the request.",
+                "tool_calls": [],
+                "metadata": self._session_metadata(),
+            }
 
-        user_msg = HumanMessage(content=str(user_input))
+        user_msg = HumanMessage(content=self._build_user_content(input_dict))
         state = {"messages": [user_msg]}
 
         try:
@@ -105,21 +153,34 @@ class ReconciliationAgentWrapper:
 
             last_msg = messages[-1]
             output = str(last_msg.content) if last_msg.content else ""
-            metadata = self._extract_metadata(output)
+
+            report_output = self._generate_default_report_if_needed(input_dict)
+            if report_output:
+                output = f"{output}\n\n{report_output}" if output else report_output
 
             SESSION_STATE._turn_count = turn_count + 1
 
-            result: dict[str, Any] = {"output": output, "tool_calls": tool_calls_list}
-            if metadata:
-                result["metadata"] = metadata
+            result: dict[str, Any] = {
+                "output": output,
+                "tool_calls": tool_calls_list,
+                "metadata": self._session_metadata(),
+            }
             return result
 
         except KeyError as e:
             logger.error("Missing expected key in graph response: %s", e)
-            return {"output": f"Error: The agent encountered an internal data error ({e}).", "tool_calls": []}
+            return {
+                "output": f"Error: The agent encountered an internal data error ({e}).",
+                "tool_calls": [],
+                "metadata": self._session_metadata(),
+            }
         except Exception as e:
             logger.exception("Unexpected error during graph invocation")
-            return {"output": f"Error: An unexpected error occurred: {e}", "tool_calls": []}
+            return {
+                "output": f"Error: An unexpected error occurred: {e}",
+                "tool_calls": [],
+                "metadata": self._session_metadata(),
+            }
 
 
 def get_reconciliation_agent() -> ReconciliationAgentWrapper:

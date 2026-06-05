@@ -38,11 +38,17 @@ class SessionContext:
 
     # Reconciliation inputs
     detected_keys: Optional[list[str]] = None
+    key_profile: Optional[list[dict[str, Any]]] = None
     primary_key_cols: Optional[list[str]] = None
     tolerance_settings: Optional[dict[str, Any]] = None
 
     # Reconciliation output
     reconciliation_results: Optional[dict[str, Any]] = None
+    report_path: Optional[str] = None
+    report_format: Optional[str] = None
+
+    # Workflow state
+    workflow_state: str = "awaiting_paths"
 
     # UI state
     _recon_table_shown: bool = False

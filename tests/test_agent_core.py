@@ -2,7 +2,7 @@
 
 Tests the wrapper class independently from the agent initialization
 to verify backward compatibility, config handling, error resilience,
-memory windowing, tool-call observability, and metadata parsing.
+memory windowing, tool-call observability, and deterministic session metadata.
 """
 import uuid
 from unittest.mock import MagicMock, patch
@@ -187,6 +187,30 @@ def test_invoke_full_turn_roundtrip():
     assert "reconcile" in state_arg["messages"][0].content
 
 
+def test_invoke_passes_structured_paths_to_model_message():
+    """Structured source/target paths should be passed without bracket augmentation."""
+    mock_graph = MagicMock()
+    mock_graph.invoke.return_value = {"messages": [AIMessage(content="ok")]}
+
+    wrapper = ReconciliationAgentWrapper(
+        graph=mock_graph,
+        tools=[],
+        system_prompt=""
+    )
+    wrapper.invoke({
+        "input": "reconcile these",
+        "source_path": "source.csv",
+        "target_path": "target.json",
+    })
+
+    state_arg = mock_graph.invoke.call_args[0][0]
+    content = state_arg["messages"][0].content
+    assert "Structured inputs:" in content
+    assert "source_path: source.csv" in content
+    assert "target_path: target.json" in content
+    assert "[Extracted paths:" not in content
+
+
 # ---------- Response contract ----------
 
 def test_invoke_response_always_has_output_key():
@@ -353,21 +377,29 @@ def test_invoke_empty_tool_calls_when_no_tools():
     assert result["tool_calls"] == []
 
 
-# ---------- Metadata block parsing ----------
+# ---------- Deterministic session metadata ----------
 
-def test_metadata_block_parsed():
-    """A [METADATA] block in the output is parsed and returned."""
+def test_metadata_comes_from_session_state_not_output_block():
+    """Metadata should be built from SESSION_STATE, not parsed from prose."""
     SESSION_STATE.reset()
     SESSION_STATE.session_thread_id = "meta-test"
+    SESSION_STATE.workflow_state = "reported"
+    SESSION_STATE.report_path = "/tmp/state-report.html"
+    SESSION_STATE.report_format = "html"
+    SESSION_STATE.reconciliation_results = {
+        "summary": {
+            "matched_rows": 42,
+            "mismatched_rows": 3,
+            "missing_in_source": 1,
+            "missing_in_target": 2,
+        }
+    }
 
     output_text = (
         "Reconciliation complete!\n\n"
         "[METADATA]\n"
-        "matched: 42\n"
-        "mismatched: 3\n"
-        "missing_in_source: 1\n"
-        "missing_in_target: 2\n"
-        "report_path: /tmp/report.html\n"
+        "matched: 999\n"
+        "report_path: /tmp/wrong.html\n"
         "[/METADATA]"
     )
 
@@ -384,11 +416,11 @@ def test_metadata_block_parsed():
     assert "metadata" in result
     assert result["metadata"]["matched"] == "42"
     assert result["metadata"]["mismatched"] == "3"
-    assert result["metadata"]["report_path"] == "/tmp/report.html"
+    assert result["metadata"]["report_path"] == "/tmp/state-report.html"
 
 
-def test_no_metadata_block():
-    """When there is no [METADATA] block, metadata is not in the result."""
+def test_metadata_returned_without_output_block():
+    """Metadata is returned even when the model emits plain text."""
     SESSION_STATE.reset()
     SESSION_STATE.session_thread_id = "no-meta"
 
@@ -402,23 +434,44 @@ def test_no_metadata_block():
     )
 
     result = wrapper.invoke({"input": "hi"})
-    assert "metadata" not in result
+    assert result["metadata"]["workflow_state"] == "awaiting_paths"
+    assert result["metadata"]["report_path"] == "none"
 
 
-def test_metadata_partial_block():
-    """A malformed metadata block with missing keys still parses what it can."""
+def test_default_report_generated_after_reconciliation(tmp_path):
+    """Wrapper generates a default report when reconciliation exists but no report is present."""
     SESSION_STATE.reset()
-    SESSION_STATE.session_thread_id = "partial-meta"
-
-    output_text = (
-        "[METADATA]\n"
-        "matched: 10\n"
-        "broken_line_no_colon\n"
-        "[/METADATA]"
-    )
+    SESSION_STATE.session_thread_id = "report-meta"
+    SESSION_STATE.workflow_state = "reconciled"
+    SESSION_STATE.source_filename = "source.csv"
+    SESSION_STATE.target_filename = "target.csv"
+    SESSION_STATE.source_fullpath = "/tmp/source.csv"
+    SESSION_STATE.target_fullpath = "/tmp/target.csv"
+    SESSION_STATE.primary_key_cols = ["id"]
+    SESSION_STATE.reconciliation_results = {
+        "summary": {
+            "total_source_rows": 1,
+            "total_target_rows": 1,
+            "clean_source_rows": 1,
+            "clean_target_rows": 1,
+            "matched_rows": 1,
+            "mismatched_rows": 0,
+            "missing_in_source": 0,
+            "missing_in_target": 0,
+            "duplicate_source": 0,
+            "duplicate_target": 0,
+        },
+        "mismatches": [],
+        "missing_in_target": [],
+        "missing_in_source": [],
+        "duplicates_source": [],
+        "duplicates_target": [],
+        "col_mismatch_stats": {},
+        "primary_keys": ["id"],
+    }
 
     mock_graph = MagicMock()
-    mock_graph.invoke.return_value = {"messages": [AIMessage(content=output_text)]}
+    mock_graph.invoke.return_value = {"messages": [AIMessage(content="Reconciliation complete.")]}
 
     wrapper = ReconciliationAgentWrapper(
         graph=mock_graph,
@@ -426,10 +479,10 @@ def test_metadata_partial_block():
         system_prompt=""
     )
 
-    result = wrapper.invoke({"input": "go"})
-    assert "metadata" in result
-    assert result["metadata"]["matched"] == "10"
-    assert "broken_line_no_colon" not in result["metadata"]
+    result = wrapper.invoke({"input": "go", "output_dir": str(tmp_path)})
+    assert "Success!" in result["output"]
+    assert result["metadata"]["workflow_state"] == "reported"
+    assert result["metadata"]["report_path"].endswith(".html")
 
 
 # ---------- Thread ID from SESSION_STATE ----------

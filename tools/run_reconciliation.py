@@ -331,6 +331,7 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
     ))
 
     if SESSION_STATE.comp_source is None or SESSION_STATE.comp_target is None:
+        SESSION_STATE.workflow_state = "awaiting_paths"
         return "Error: Source and Target data have not been loaded yet. Please call analyze_files first."
 
     comp_source = SESSION_STATE.comp_source
@@ -341,6 +342,7 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
     key_cols = [k.strip() for k in primary_key.split(",") if k.strip()]
     for key in key_cols:
         if key not in comp_source.columns:
+            SESSION_STATE.workflow_state = "awaiting_primary_key"
             return f"Error: Key column '{key}' not found in the aligned columns. Available columns: {list(comp_source.columns)}"
 
     tolerance_dict = None
@@ -410,9 +412,13 @@ def run_reconciliation(primary_key: str, tolerance: str = "strict") -> str:
 
         SESSION_STATE.reconciliation_results = results
         SESSION_STATE._recon_table_shown = False
+        SESSION_STATE.workflow_state = "reconciled"
+        SESSION_STATE.report_path = None
+        SESSION_STATE.report_format = None
 
         return _render_summary(results, mismatches)
 
     except Exception as e:
         logger.exception("Error during reconciliation processing")
+        SESSION_STATE.workflow_state = "analyzed"
         return f"Error executing reconciliation comparison: {str(e)}"

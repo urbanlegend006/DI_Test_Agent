@@ -98,6 +98,7 @@ def test_full_toolchain_pipeline(temp_files, tmp_path):
         "target_path": tgt_path
     })
     assert "Successfully loaded" in result_analyze
+    assert SESSION_STATE.workflow_state in {"analyzed", "awaiting_primary_key"}
     assert SESSION_STATE.source_df is not None
     assert SESSION_STATE.target_df is not None
     assert SESSION_STATE.comp_source is not None
@@ -109,6 +110,7 @@ def test_full_toolchain_pipeline(temp_files, tmp_path):
         "tolerance": "strict"
     })
     assert "Reconciliation Completed Successfully!" in result_recon
+    assert SESSION_STATE.workflow_state == "reconciled"
     assert SESSION_STATE.reconciliation_results is not None
 
     results = SESSION_STATE.reconciliation_results
@@ -121,6 +123,9 @@ def test_full_toolchain_pipeline(temp_files, tmp_path):
     # Step 3: Generate HTML report
     result_html = generate_report.invoke({"format": "html", "output_dir": str(tmp_path)})
     assert "Success" in result_html or "report" in result_html.lower()
+    assert SESSION_STATE.workflow_state == "reported"
+    assert SESSION_STATE.report_path is not None
+    assert SESSION_STATE.report_format == "html"
     # Verify the HTML file was actually created
     assert "html" in result_html.lower()
 
@@ -189,29 +194,30 @@ def test_system_prompt_declines_non_reconciliation():
     assert "non-reconciliation" in SYSTEM_PROMPT.lower() or "unrelated" in SYSTEM_PROMPT.lower()
 
 
-def test_system_prompt_has_all_workflow_steps():
-    """The system prompt must contain all 8 workflow steps."""
+def test_system_prompt_has_core_workflow_steps():
+    """The system prompt must contain the core orchestration steps."""
     from agent import SYSTEM_PROMPT
-    for step_num in range(1, 9):
+    for step_num in range(1, 8):
         assert f"{step_num}." in SYSTEM_PROMPT
     assert "analyze_files" in SYSTEM_PROMPT
     assert "run_reconciliation" in SYSTEM_PROMPT
-    assert "generate_report" in SYSTEM_PROMPT
+    assert "Reports are generated" in SYSTEM_PROMPT
 
 
 def test_system_prompt_contains_response_format_guidelines():
     """The system prompt should instruct the agent on response format."""
     from agent import SYSTEM_PROMPT
-    assert "bullet points" in SYSTEM_PROMPT.lower()
+    assert "bullets" in SYSTEM_PROMPT.lower()
     assert "section headers" in SYSTEM_PROMPT.lower()
-    assert "structured" in SYSTEM_PROMPT.lower()
+    assert "report paths" in SYSTEM_PROMPT.lower()
+    assert "hidden metadata" in SYSTEM_PROMPT.lower()
 
 
 def test_system_prompt_contains_guiding_rules():
     """The system prompt should include all key guiding rules."""
     from agent import SYSTEM_PROMPT
-    assert "Never hallucinate" in SYSTEM_PROMPT
-    assert "Scope Restriction" in SYSTEM_PROMPT or "SCOPE RESTRICTION" in SYSTEM_PROMPT
+    assert "Do not invent" in SYSTEM_PROMPT
+    assert "only a Data Reconciliation Agent" in SYSTEM_PROMPT
     assert "Source" in SYSTEM_PROMPT and "Target" in SYSTEM_PROMPT
 
 
@@ -274,34 +280,35 @@ def test_agent_uses_checkpointer():
 def test_system_prompt_auto_proceed():
     """System prompt must instruct the agent to auto-proceed when both paths are given."""
     from agent import SYSTEM_PROMPT
-    assert "extract both paths immediately" in SYSTEM_PROMPT
-    assert "proceed to step 2" in SYSTEM_PROMPT.lower()
-    assert "Do NOT ask for the second path again" in SYSTEM_PROMPT
+    assert "both Source and Target paths" in SYSTEM_PROMPT
+    assert "analyze_files" in SYSTEM_PROMPT
+    assert "structured source_path/target_path" in SYSTEM_PROMPT
 
 
 def test_system_prompt_error_handling():
     """System prompt must instruct the agent to explain errors without crashing."""
     from agent import SYSTEM_PROMPT
-    assert "explain the issue clearly" in SYSTEM_PROMPT
-    assert "Do not crash" in SYSTEM_PROMPT
+    assert "malformed" in SYSTEM_PROMPT
+    assert "unsupported" in SYSTEM_PROMPT
+    assert "stop the workflow" in SYSTEM_PROMPT
 
 
 def test_system_prompt_hallucination_guard():
     """System prompt must contain hallucination prevention instructions."""
     from agent import SYSTEM_PROMPT
-    assert "Never hallucinate" in SYSTEM_PROMPT
-    assert "Rely ONLY on tool outputs" in SYSTEM_PROMPT
+    assert "Do not invent" in SYSTEM_PROMPT
+    assert "tool calls" in SYSTEM_PROMPT or "tool output" in SYSTEM_PROMPT
 
 
 def test_system_prompt_output_summary():
     """System prompt must instruct the agent to show a summary with all required metrics."""
     from agent import SYSTEM_PROMPT
-    assert "matched count" in SYSTEM_PROMPT.lower()
-    assert "mismatched count" in SYSTEM_PROMPT.lower()
+    assert "matched" in SYSTEM_PROMPT.lower()
+    assert "mismatched" in SYSTEM_PROMPT.lower()
     assert "missing in source" in SYSTEM_PROMPT.lower()
     assert "missing in target" in SYSTEM_PROMPT.lower()
     assert "severity breakdown" in SYSTEM_PROMPT.lower()
-    assert "table format" in SYSTEM_PROMPT.lower() or "bulleted" in SYSTEM_PROMPT.lower()
+    assert "bullets" in SYSTEM_PROMPT.lower() or "section headers" in SYSTEM_PROMPT.lower()
 
 
 # ---------- Session isolation tests ----------

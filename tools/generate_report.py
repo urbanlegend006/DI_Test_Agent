@@ -62,6 +62,9 @@ def generate_report(format: str = "html", output_dir: Optional[str] = None) -> s
         abs_path = report_path.resolve()
         file_uri = abs_path.as_uri()
         logger.info("Report successfully generated at: %s", abs_path)
+        SESSION_STATE.report_path = str(abs_path)
+        SESSION_STATE.report_format = fmt
+        SESSION_STATE.workflow_state = "reported"
 
         return (
             f"Success! The {fmt.upper()} report has been generated.\n"

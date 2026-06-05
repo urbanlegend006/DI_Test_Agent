@@ -144,6 +144,7 @@ def _build_summary(
     src_file: Path, tgt_file: Path,
     src_df: pd.DataFrame, tgt_df: pd.DataFrame,
     align_meta: dict, common_keys: list[str] | None,
+    key_profile: list[dict] | None,
 ) -> str:
     """Build the markdown summary string returned to the agent."""
     summary = (
@@ -174,7 +175,46 @@ def _build_summary(
             "Please ask the user to supply the primary key(s) "
             "before running reconciliation.\n"
         )
+    if key_profile:
+        profile_lines = []
+        for item in key_profile[:5]:
+            profile_lines.append(
+                f"  - {item['column']}: uniqueness {item['uniqueness_pct']:.1f}%, "
+                f"null/blank {item['blank_pct']:.1f}%"
+            )
+        summary += "\n**Primary Key Candidate Profile:**\n" + "\n".join(profile_lines) + "\n"
     return summary
+
+
+def _profile_key_candidates(df: pd.DataFrame) -> list[dict]:
+    """Return simple uniqueness/null stats for likely key columns."""
+    profile = []
+    total = len(df)
+    if total == 0:
+        return profile
+
+    from utils.key_detector import _has_indicator
+
+    for col in df.columns:
+        series = df[col].astype(str).str.strip()
+        blank_count = int((series == "").sum())
+        non_blank = series[series != ""]
+        uniqueness_pct = (non_blank.nunique() / len(non_blank) * 100) if len(non_blank) else 0.0
+        blank_pct = blank_count / total * 100
+        is_likely = _has_indicator(col) or uniqueness_pct == 100.0
+        if is_likely:
+            profile.append({
+                "column": col,
+                "uniqueness_pct": uniqueness_pct,
+                "blank_pct": blank_pct,
+                "has_key_name": _has_indicator(col),
+            })
+
+    return sorted(
+        profile,
+        key=lambda x: (x["uniqueness_pct"], -x["blank_pct"], x["has_key_name"]),
+        reverse=True,
+    )
 
 
 @tool
@@ -203,8 +243,10 @@ def analyze_files(source_path: str, target_path: str) -> str:
         tgt_file = clean_path(target_path)
 
         if not src_file.exists():
+            SESSION_STATE.workflow_state = "awaiting_paths"
             return f"Error: Source file does not exist at path: {source_path}"
         if not tgt_file.exists():
+            SESSION_STATE.workflow_state = "awaiting_paths"
             return f"Error: Target file does not exist at path: {target_path}"
 
         # Check file sizes
@@ -225,6 +267,8 @@ def analyze_files(source_path: str, target_path: str) -> str:
         else:
             common_keys = detected_src_keys or detected_tgt_keys
 
+        key_profile = _profile_key_candidates(comp_src)
+
         SESSION_STATE.source_df = src_df
         SESSION_STATE.target_df = tgt_df
         SESSION_STATE.comp_source = comp_src
@@ -235,9 +279,15 @@ def analyze_files(source_path: str, target_path: str) -> str:
         SESSION_STATE.source_fullpath = str(src_file.resolve())
         SESSION_STATE.target_fullpath = str(tgt_file.resolve())
         SESSION_STATE.detected_keys = common_keys
+        SESSION_STATE.key_profile = key_profile
+        SESSION_STATE.workflow_state = "analyzed" if common_keys else "awaiting_primary_key"
+        SESSION_STATE.reconciliation_results = None
+        SESSION_STATE.report_path = None
+        SESSION_STATE.report_format = None
 
-        return _build_summary(src_file, tgt_file, src_df, tgt_df, align_meta, common_keys)
+        return _build_summary(src_file, tgt_file, src_df, tgt_df, align_meta, common_keys, key_profile)
 
     except Exception as e:
         logger.exception("Error in analyze_files")
+        SESSION_STATE.workflow_state = "awaiting_paths"
         return f"I encountered an error parsing the files: {str(e)}. Please check the file formats or paths."

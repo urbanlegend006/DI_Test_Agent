@@ -133,3 +133,22 @@ def test_polite_decline_constant():
     assert isinstance(POLITE_DECLINE, str)
     assert len(POLITE_DECLINE) > 20
     assert "Data Integrity" in POLITE_DECLINE
+
+
+def test_cli_preprocess_returns_structured_paths():
+    """CLI preprocessing should pass paths as structured fields."""
+    from main import _preprocess_input
+
+    payload = _preprocess_input('compare "source.csv" with "target.json"')
+    assert payload["input"] == 'compare "source.csv" with "target.json"'
+    assert payload["source_path"] == "source.csv"
+    assert payload["target_path"] == "target.json"
+    assert payload["report_format"] == "html"
+
+
+def test_cli_preprocess_detects_excel_report_request():
+    """Excel report requests should be carried as structured report format."""
+    from main import _preprocess_input
+
+    payload = _preprocess_input('compare "source.csv" with "target.json" and generate excel')
+    assert payload["report_format"] == "excel"
