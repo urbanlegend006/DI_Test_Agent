@@ -182,3 +182,71 @@ def test_report_generation_without_recon_data():
 
     result = generate_report.invoke({"format": "html"})
     assert "error" in result.lower() or "Error" in result
+
+
+# ---------- LLM Behavior Tests ----------
+
+def test_system_prompt_declines_non_reconciliation():
+    """The system prompt must include the scope restriction decline message."""
+    from agent import SYSTEM_PROMPT
+    assert "politely decline" in SYSTEM_PROMPT.lower()
+    assert "I am a Data Integrity Test Agent" in SYSTEM_PROMPT
+    assert "non-reconciliation" in SYSTEM_PROMPT.lower() or "unrelated" in SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_has_all_workflow_steps():
+    """The system prompt must contain all 8 workflow steps."""
+    from agent import SYSTEM_PROMPT
+    for step_num in range(1, 9):
+        assert f"{step_num}." in SYSTEM_PROMPT
+    assert "analyze_files" in SYSTEM_PROMPT
+    assert "run_reconciliation" in SYSTEM_PROMPT
+    assert "generate_report" in SYSTEM_PROMPT
+
+
+def test_system_prompt_contains_response_format_guidelines():
+    """The system prompt should instruct the agent on response format."""
+    from agent import SYSTEM_PROMPT
+    assert "bullet points" in SYSTEM_PROMPT.lower()
+    assert "section headers" in SYSTEM_PROMPT.lower()
+    assert "structured" in SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_contains_guiding_rules():
+    """The system prompt should include all key guiding rules."""
+    from agent import SYSTEM_PROMPT
+    assert "Never hallucinate" in SYSTEM_PROMPT
+    assert "Scope Restriction" in SYSTEM_PROMPT or "SCOPE RESTRICTION" in SYSTEM_PROMPT
+    assert "Source" in SYSTEM_PROMPT and "Target" in SYSTEM_PROMPT
+
+
+def test_model_configured_with_temperature_zero():
+    """ChatOpenAI should be initialised with temperature=0 for consistent outputs."""
+    with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key-for-unit-test"):
+        with patch("agent.ChatOpenAI") as MockLLM:
+            mock_llm_instance = MagicMock()
+            mock_llm_instance.bind_tools = MagicMock(return_value=mock_llm_instance)
+            MockLLM.return_value = mock_llm_instance
+
+            from agent import get_reconciliation_agent
+            get_reconciliation_agent()
+
+            MockLLM.assert_called_once()
+            _call_kwargs = MockLLM.call_args.kwargs
+            assert _call_kwargs.get("temperature") == 0
+
+
+def test_agent_binds_all_three_tools():
+    """The LLM should receive all three tools bound for tool calling."""
+    with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key-for-unit-test"):
+        with patch("agent.ChatOpenAI") as MockLLM:
+            mock_llm_instance = MagicMock()
+            MockLLM.return_value = mock_llm_instance
+
+            from agent import get_reconciliation_agent
+            executor = get_reconciliation_agent()
+
+            tool_names = [t.name for t in executor.tools]
+            assert "analyze_files" in tool_names
+            assert "run_reconciliation" in tool_names
+            assert "generate_report" in tool_names
