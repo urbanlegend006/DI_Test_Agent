@@ -28,6 +28,7 @@ from rich.columns import Columns
 from rich.text import Text
 
 from config import OPENAI_MODEL, configure_logging
+from utils.preprocessing import extract_paths, is_reconciliation_related, POLITE_DECLINE
 
 logger = logging.getLogger("reconciliation_agent.main")
 console = Console()
@@ -123,6 +124,7 @@ def handle_slash_command(cmd: str) -> bool:
         return True
     elif cmd_lower == "/clear":
         SESSION_STATE.reset()
+        _refresh_thread_id()
         console.clear()
         print_welcome_banner()
         return True
@@ -130,6 +132,42 @@ def handle_slash_command(cmd: str) -> bool:
         show_status()
         return True
     return False
+
+
+def _refresh_thread_id() -> None:
+    """Generate a fresh thread ID after ``/clear`` to isolate conversation history."""
+    import uuid
+    from tools import SESSION_STATE
+    SESSION_STATE.session_thread_id = uuid.uuid4().hex
+    SESSION_STATE._turn_count = 0
+    SESSION_STATE._session_generation = 0
+
+
+def _preprocess_input(user_input: str) -> str | None:
+    """Preprocess user input before passing it to the LLM.
+
+    Returns ``None`` if the input was handled (e.g. off-topic) and the
+    caller should continue without invoking the agent.  Otherwise returns
+    the (possibly augmented) message to pass to the LLM.
+    """
+    from tools import SESSION_STATE
+
+    # 1. Guardrail: decline off-topic queries without an LLM call.
+    if not is_reconciliation_related(user_input):
+        console.print(f"[dim]\U0001f916 {POLITE_DECLINE}[/dim]")
+        return None
+
+    # 2. Deterministic file-path extraction.
+    paths = extract_paths(user_input)
+    if len(paths) >= 2:
+        SESSION_STATE._extracted_paths = paths[:2]
+        augmented = (
+        f"[Extracted paths: source={paths[0]!r}, target={paths[1]!r}]\n"
+        f"{user_input}"
+        )
+        return augmented
+
+    return user_input
 
 
 def get_status_bar():
@@ -204,7 +242,7 @@ def main():
 
     while True:
         try:
-            user_input = console.input("[bold cyan]  \u276f[/bold cyan] ")
+            user_input = console.input(f"[bold cyan]  \u276f[/bold cyan] {get_status_bar()} ")
 
             if not user_input.strip():
                 continue
@@ -218,9 +256,21 @@ def main():
                 console.print("\n[bold red]Exiting chatbot loop. Goodbye![/bold red]")
                 sys.exit(0)
 
+            # Preprocess: guardrails + path extraction (may short-circuit)
+            augmented_input = _preprocess_input(user_input)
+            if augmented_input is None:
+                console.print()
+                continue
+
             console.print("[bold green]Agent thinking...[/bold green]")
-            response = agent_executor.invoke({"input": user_input})
+            response = agent_executor.invoke({"input": augmented_input})
             agent_response = response.get("output", "No response received.")
+            tool_calls = response.get("tool_calls", [])
+
+            # Show tool-call summary for observability
+            if tool_calls:
+                tool_names = {tc["name"] for tc in tool_calls}
+                console.print(f"[dim]\U0001f50d Tool calls: {', '.join(sorted(tool_names))}[/dim]")
 
             console.print(Markdown(f" \U0001f916 {agent_response}"))
 

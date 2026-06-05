@@ -302,3 +302,47 @@ def test_system_prompt_output_summary():
     assert "missing in target" in SYSTEM_PROMPT.lower()
     assert "severity breakdown" in SYSTEM_PROMPT.lower()
     assert "table format" in SYSTEM_PROMPT.lower() or "bulleted" in SYSTEM_PROMPT.lower()
+
+
+# ---------- Session isolation tests ----------
+
+def test_session_thread_id_is_unique():
+    """Each call to get_reconciliation_agent should generate a unique thread_id."""
+    from agent import get_reconciliation_agent
+
+    with patch("agent.OPENAI_API_KEY", "sk-test-dummy-key"):
+        with patch("agent.ChatOpenAI") as mock_llm:
+            mock_llm_instance = MagicMock()
+            mock_llm_instance.bind_tools = MagicMock(return_value=mock_llm_instance)
+            mock_llm.return_value = mock_llm_instance
+
+            from tools import SESSION_STATE as ss1
+            ss1.reset()
+            executor1 = get_reconciliation_agent()
+            tid1 = ss1.session_thread_id
+
+            ss1.reset()
+            executor2 = get_reconciliation_agent()
+            tid2 = ss1.session_thread_id
+
+            assert tid1, "First thread_id should not be empty"
+            assert tid2, "Second thread_id should not be empty"
+            assert tid1 != tid2, "Each session should have a unique thread_id"
+
+
+def test_clear_resets_thread_id():
+    """After /clear (SESSION_STATE.reset()), a new thread_id is generated."""
+    from tools import SESSION_STATE
+    import uuid
+
+    SESSION_STATE.reset()
+    SESSION_STATE.session_thread_id = uuid.uuid4().hex
+    original_tid = SESSION_STATE.session_thread_id
+
+    # Simulate /clear
+    SESSION_STATE.reset()
+    SESSION_STATE.session_thread_id = uuid.uuid4().hex
+
+    new_tid = SESSION_STATE.session_thread_id
+    assert original_tid != new_tid, "Thread ID should change after /clear"
+    assert new_tid, "New thread ID should not be empty"

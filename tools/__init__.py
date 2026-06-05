@@ -47,6 +47,12 @@ class SessionContext:
     # UI state
     _recon_table_shown: bool = False
 
+    # Session tracking (populated by agent.py)
+    session_thread_id: str = ""
+    _turn_count: int = 0
+    _session_generation: int = 0
+    _extracted_paths: Optional[list[str]] = None
+
     def reset(self) -> None:
         """Reset every field back to its declared default value.
 

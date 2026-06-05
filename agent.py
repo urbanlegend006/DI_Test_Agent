@@ -1,17 +1,24 @@
 import logging
+import uuid
+import re
 from typing import Any, Protocol, runtime_checkable
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from config import OPENAI_MODEL, OPENAI_API_KEY
+from config import OPENAI_MODEL, OPENAI_API_KEY, MEMORY_WINDOW_SIZE
+from utils.prompts import get_system_prompt, PROMPT_VERSIONS
+from tools import SESSION_STATE
 from tools.analyze_files import analyze_files
 from tools.run_reconciliation import run_reconciliation
 from tools.generate_report import generate_report
 
 logger = logging.getLogger("reconciliation_agent.agent")
+
+# Backward-compatible alias for existing tests.
+SYSTEM_PROMPT = PROMPT_VERSIONS["v1"]
 
 
 @runtime_checkable
@@ -29,38 +36,53 @@ class ReconciliationAgentWrapper:
 
     @property
     def agent(self):
-        """Return ``self`` for backward compatibility with ``AgentExecutor``."""
         return self
 
     def get_prompts(self):
-        """Allows testing code that expects a prompt template structure."""
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.system_prompt)
         ])
         return [prompt]
 
+    @staticmethod
+    def _extract_metadata(output: str) -> dict[str, str] | None:
+        """Parse ``[METADATA]...[/METADATA]`` block from agent output."""
+        m = re.search(r'\[METADATA\](.*?)\[/METADATA\]', output, re.DOTALL)
+        if not m:
+            return None
+        meta: dict[str, str] = {}
+        for line in m.group(1).strip().splitlines():
+            if ':' in line:
+                key, _, val = line.partition(':')
+                meta[key.strip()] = val.strip()
+        return meta
+
+    @staticmethod
+    def _current_thread_id() -> str:
+        """Return the thread ID from ``SESSION_STATE`` or generate a fresh one."""
+        tid: str = getattr(SESSION_STATE, "session_thread_id", None) or uuid.uuid4().hex
+        return tid
+
     def invoke(self, input_dict: dict, config: dict[str, Any] | None = None) -> dict:
-        """Invoke the compiled agent graph with history-preserving memory.
-
-        Accepts the caller's ``config`` dict without mutating it, injects a
-        default ``thread_id`` when none is present, and wraps graph errors
-        into graceful ``{"output": …}`` responses.
-
-        Args:
-            input_dict: Must contain an ``"input"`` key with the user message.
-            config: Optional LangGraph runtime configuration dict.
-
-        Returns:
-            Dictionary with an ``"output"`` key containing the agent's text
-            response or an error message.
-        """
         config = dict(config) if config is not None else {}
+
+        thread_id = self._current_thread_id()
+        turn_count: int = getattr(SESSION_STATE, "_turn_count", 0)
+        generation: int = getattr(SESSION_STATE, "_session_generation", 0)
+
+        if turn_count >= MEMORY_WINDOW_SIZE:
+            generation += 1
+            SESSION_STATE._session_generation = generation
+            SESSION_STATE._turn_count = 0
+            turn_count = 0
+
+        effective_thread_id = f"{thread_id}-gen{generation}"
         config.setdefault("configurable", {})
-        config["configurable"].setdefault("thread_id", "reconciliation-session")
+        config["configurable"].setdefault("thread_id", effective_thread_id)
 
         user_input = input_dict.get("input")
         if user_input is None:
-            return {"output": "Error: 'input' key is missing from the request."}
+            return {"output": "Error: 'input' key is missing from the request.", "tool_calls": []}
 
         user_msg = HumanMessage(content=str(user_input))
         state = {"messages": [user_msg]}
@@ -69,69 +91,41 @@ class ReconciliationAgentWrapper:
             response_state = self.graph.invoke(state, config=config)
             messages = response_state.get("messages", [])
             if not messages:
-                return {"output": "Error: The agent returned an empty response."}
+                return {"output": "Error: The agent returned an empty response.", "tool_calls": []}
+
+            tool_calls_list = []
+            for msg in messages:
+                if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                    for tc in msg.tool_calls:
+                        tool_calls_list.append({
+                            "name": tc.get("name", "unknown"),
+                            "args": tc.get("args", {}),
+                            "id": tc.get("id", ""),
+                        })
+
             last_msg = messages[-1]
-            return {"output": last_msg.content}
+            output = str(last_msg.content) if last_msg.content else ""
+            metadata = self._extract_metadata(output)
+
+            SESSION_STATE._turn_count = turn_count + 1
+
+            result: dict[str, Any] = {"output": output, "tool_calls": tool_calls_list}
+            if metadata:
+                result["metadata"] = metadata
+            return result
+
         except KeyError as e:
             logger.error("Missing expected key in graph response: %s", e)
-            return {"output": f"Error: The agent encountered an internal data error ({e})."}
+            return {"output": f"Error: The agent encountered an internal data error ({e}).", "tool_calls": []}
         except Exception as e:
             logger.exception("Unexpected error during graph invocation")
-            return {"output": f"Error: An unexpected error occurred: {e}"}
+            return {"output": f"Error: An unexpected error occurred: {e}", "tool_calls": []}
 
-SYSTEM_PROMPT = (
-    "You are an expert Data Reconciliation Test Agent.\n"
-    "Your objective is to guide users to compare two data files (Excel, JSON, or CSV), "
-    "identify mismatches, missing rows, or duplicate records, and generate clear reports.\n\n"
-    "Workflow:\n"
-    "1. If the user provides both file paths in a single message (e.g. "
-    "\"reconcile 'source.xlsx' vs 'target.csv'\"), extract both paths immediately "
-    "and proceed to step 2. Do NOT ask for the second path again.\n"
-    "2. Call the `analyze_files` tool with Source and Target paths to load and understand file structures.\n"
-    "3. Review the outputs. If a primary key was not auto-detected (or if multiple candidates were found), "
-     "   prompt the user to specify or confirm the column(s) to use "
-     "as the primary key. You can support composite keys (comma-separated).\n"
-    "4. Ask the user if they want exact matching (strict) or fuzzy matching "
-    "(with custom tolerances for numeric or date differences).\n"
-    "5. Call the `run_reconciliation` tool with the primary key and tolerance settings.\n"
-    "6. Display a detailed summary of the reconciliation findings to the user.\n"
-    "7. Call the `generate_report` tool to create the final report. "
-    "Offer the user a choice between HTML (default) or Excel.\n"
-    "8. Provide the final absolute file path link clearly to the user.\n\n"
-    "IMPORTANT: When the user says 'compare', 'reconcile', 'find differences', "
-    "'match files', or similar, you MUST proceed through the FULL workflow "
-    "(steps 1-8) automatically. Do NOT stop after analysis. "
-    "Only pause for user input if critical information (like primary key) is "
-    "truly ambiguous or missing.\n\n"
-    "Guiding Rules:\n"
-    "- Never hallucinate file contents or counts. Rely ONLY on tool outputs.\n"
-    "- If an execution step fails or a file is malformed, explain the issue clearly. Do not crash.\n"
-    "- Terminology: Use 'Source' for the first file and 'Target' for the second file.\n"
-    "- SCOPE RESTRICTION: You are ONLY a Data Reconciliation Agent. "
-    "You MUST politely decline any question or request unrelated to "
-    "data file reconciliation, comparison, or integrity testing.\n"
-    "- If asked about general knowledge, weather, colors, programming help, "
-    "or any non-reconciliation topic, respond with: "
-    "'I am a Data Integrity Test Agent. I can only help with reconciling "
-    "data files (XLSX, CSV, JSON, TXT, Parquet). Please provide Source "
-    "and Target file paths for reconciliation.'\n"
-    "Response Format:\n"
-    "- Always respond with structured, multi-line, human-readable text.\n"
-    "- Use bullet points (•), bold counts, and clear section headers.\n"
-    "- Preserve and reformat the detailed output from tools — never collapse "
-    "it into a single sentence or line.\n"
-    "- For analysis results: show file names, row counts, column counts, "
-    "aligned columns list, and key candidates in a clear formatted structure.\n"
-    "- For reconciliation results: show matched count, mismatched count, "
-    "missing in source, missing in target, duplicates, and severity breakdown "
-    "in a readable bulleted or table format.\n"
-)
 
 def get_reconciliation_agent() -> ReconciliationAgentWrapper:
     """Configures and returns the LangChain tool-calling Agent graph wrapper."""
     logger.info("Initializing LangChain reconciliation agent using model %s", OPENAI_MODEL)
 
-    # 1. Define LLM
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY environment variable is not set. Please check your .env file.")
 
@@ -141,16 +135,10 @@ def get_reconciliation_agent() -> ReconciliationAgentWrapper:
         api_key=OPENAI_API_KEY
     )
 
-    # 2. Define prompt structure
-    system_prompt = SYSTEM_PROMPT
-
-    # 3. Setup tools
+    system_prompt = get_system_prompt()
     tools = [analyze_files, run_reconciliation, generate_report]
-
-    # 4. Setup checkpointer for memory
     checkpointer = MemorySaver()
 
-    # 5. Create compiled agent graph
     graph = create_agent(
         model=llm,
         tools=tools,
@@ -158,8 +146,11 @@ def get_reconciliation_agent() -> ReconciliationAgentWrapper:
         checkpointer=checkpointer
     )
 
-    # 6. Wrap for AgentExecutor backward compatibility
     executor = ReconciliationAgentWrapper(graph, tools, system_prompt)
+
+    SESSION_STATE.session_thread_id = uuid.uuid4().hex
+    SESSION_STATE._turn_count = 0
+    SESSION_STATE._session_generation = 0
 
     logger.info("Agent graph successfully initialized.")
     return executor
